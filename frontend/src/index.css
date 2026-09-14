@@ -155,7 +155,14 @@ button, input, textarea, select { font: inherit; }
   border: 1px solid var(--line);
   padding: 2rem 1.5rem;
 }
-.auth-card h2 { text-align: center; margin-bottom: 1.25rem; }
+.auth-card h2 {
+  text-align: center;
+  margin-bottom: 1.25rem;
+  font-size: clamp(1.55rem, 5.5vw, 2.15rem);
+  line-height: 1.1;
+  letter-spacing: 0.02em;
+  overflow-wrap: anywhere;
+}
 .auth-card .form { max-width: none; width: 100%; }
 .auth-card .btn { width: 100%; }
 .auth-links {
