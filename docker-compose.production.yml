@@ -1,0 +1,35 @@
+# Local / Selectel-style compose (MySQL на хосте или в сети).
+# Секреты — только через .env (не коммитить).
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: dbarber-backend
+    restart: unless-stopped
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      Database__Provider: MySql
+      ConnectionStrings__DefaultConnection: ${APP_CONNECTION_STRING}
+      Jwt__Key: ${JWT_KEY}
+      Jwt__Issuer: ${JWT_ISSUER:-DBarberApi}
+      Jwt__Audience: ${JWT_AUDIENCE:-DBarberClient}
+      Telegram__BotToken: ${TELEGRAM_BOT_TOKEN:-}
+      Telegram__AdminChatId: ${TELEGRAM_ADMIN_CHAT_ID:-}
+      App__FrontendPublicUrl: ${FRONTEND_PUBLIC_URL:-}
+    ports:
+      - "${BACKEND_PORT:-55511}:44315"
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_URL: ${VITE_API_URL:-}
+    container_name: dbarber-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "${FRONTEND_PORT:-55512}:80"

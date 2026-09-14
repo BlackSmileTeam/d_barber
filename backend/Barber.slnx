@@ -1,0 +1,7 @@
+<Solution>
+  <Project Path="Barber.Api.Tests/Barber.Api.Tests.csproj" />
+  <Project Path="Barber.Api/Barber.Api.csproj" />
+  <Project Path="Barber.Application/Barber.Application.csproj" />
+  <Project Path="Barber.Domain/Barber.Domain.csproj" />
+  <Project Path="Barber.Infrastructure/Barber.Infrastructure.csproj" />
+</Solution>
