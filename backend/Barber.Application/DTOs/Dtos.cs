@@ -41,6 +41,7 @@ public record SalonSettingsDto(
     string City,
     string? Phone,
     string? AboutHtml,
+    string? AboutImageUrl,
     string? MapLat,
     string? MapLon,
     string BookingUrl);

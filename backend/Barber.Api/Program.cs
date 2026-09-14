@@ -59,6 +59,12 @@ builder.Services.AddCors(options =>
 
 var app = builder.Build();
 
+var wwwroot = Path.Combine(app.Environment.ContentRootPath, "wwwroot");
+if (!Directory.Exists(wwwroot))
+    Directory.CreateDirectory(wwwroot);
+Directory.CreateDirectory(Path.Combine(wwwroot, "uploads"));
+app.Environment.WebRootPath = wwwroot;
+
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<BarberDbContext>();
@@ -85,6 +91,7 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseCors("frontend");
+app.UseStaticFiles();
 app.UseAuthentication();
 app.UseAuthorization();
 app.MapControllers();

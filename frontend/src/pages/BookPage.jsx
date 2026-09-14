@@ -53,6 +53,8 @@ export default function BookPage() {
   const [slots, setSlots] = useState([]);
   const [slot, setSlot] = useState(null);
   const [salon, setSalon] = useState(null);
+  const [loadFailed, setLoadFailed] = useState(false);
+  const [loaded, setLoaded] = useState(false);
   const { auth } = useAuth();
   const { show } = useModal();
   const navigate = useNavigate();
@@ -61,11 +63,17 @@ export default function BookPage() {
   useEffect(() => {
     Promise.all([api.get('/services'), api.get('/salon')])
       .then(([s, salonRes]) => {
-        setServices(s.data);
+        setServices(s.data || []);
         setSalon(salonRes.data);
+        setLoadFailed(false);
       })
-      .catch((e) => show({ title: 'Ошибка', message: apiErrorMessage(e) }));
-  }, [show]);
+      .catch(() => {
+        setServices([]);
+        setSalon(null);
+        setLoadFailed(true);
+      })
+      .finally(() => setLoaded(true));
+  }, []);
 
   useEffect(() => {
     if (!canBook) {
@@ -79,8 +87,8 @@ export default function BookPage() {
     if (!canBook || !service || !date) return;
     api.get('/appointments/slots', { params: { serviceId: service.id, date } })
       .then((r) => setSlots(r.data.slotsUtc || []))
-      .catch((e) => show({ title: 'Ошибка', message: apiErrorMessage(e) }));
-  }, [canBook, service, date, show]);
+      .catch(() => setSlots([]));
+  }, [canBook, service, date]);
 
   const slotLabels = useMemo(
     () => slots.map((s) => ({ utc: s, label: new Date(s).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }) })),
@@ -139,6 +147,10 @@ export default function BookPage() {
       <div className="container">
         <h2>Онлайн-запись</h2>
 
+        {(loadFailed || (loaded && services.length === 0)) ? (
+          <p className="empty-block">Данные отсутствуют</p>
+        ) : (
+          <>
         {canBook && (
           <div className="progress">
             <span className={step === 1 ? 'on' : ''}>1 Услуга</span>
@@ -231,6 +243,8 @@ export default function BookPage() {
             )}
           </div>
         </div>
+          </>
+        )}
       </div>
     </section>
   );

@@ -10,8 +10,13 @@ namespace Barber.Api.Controllers;
 
 [ApiController]
 [Route("api")]
-public class ContentController(BarberDbContext db) : ControllerBase
+public class ContentController(BarberDbContext db, IWebHostEnvironment env) : ControllerBase
 {
+    private static readonly HashSet<string> AllowedImageExt = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".jpg", ".jpeg", ".png", ".webp"
+    };
+
     [HttpGet("health")]
     public async Task<IActionResult> Health(CancellationToken ct)
     {
@@ -37,9 +42,41 @@ public class ContentController(BarberDbContext db) : ControllerBase
         s.City = dto.City;
         s.Phone = dto.Phone;
         s.AboutHtml = dto.AboutHtml;
+        if (!string.IsNullOrWhiteSpace(dto.AboutImageUrl))
+            s.AboutImageUrl = dto.AboutImageUrl;
         s.MapLat = dto.MapLat;
         s.MapLon = dto.MapLon;
         s.BookingUrl = dto.BookingUrl;
+        await db.SaveChangesAsync(ct);
+        return Ok(MapSalon(s));
+    }
+
+    [Authorize(Roles = "Admin")]
+    [HttpPost("admin/salon/about-image")]
+    [RequestSizeLimit(5_000_000)]
+    public async Task<ActionResult<SalonSettingsDto>> UploadAboutImage(IFormFile file, CancellationToken ct)
+    {
+        if (file is null || file.Length == 0)
+            return BadRequest(new { message = "Файл не выбран" });
+
+        var ext = Path.GetExtension(file.FileName);
+        if (string.IsNullOrWhiteSpace(ext) || !AllowedImageExt.Contains(ext))
+            return BadRequest(new { message = "Допустимы JPG, PNG или WebP" });
+
+        var wwwroot = env.WebRootPath;
+        if (string.IsNullOrWhiteSpace(wwwroot))
+            wwwroot = Path.Combine(env.ContentRootPath, "wwwroot");
+
+        var uploads = Path.Combine(wwwroot, "uploads");
+        Directory.CreateDirectory(uploads);
+
+        var fileName = $"about-{Guid.NewGuid():N}{ext.ToLowerInvariant()}";
+        var fullPath = Path.Combine(uploads, fileName);
+        await using (var stream = System.IO.File.Create(fullPath))
+            await file.CopyToAsync(stream, ct);
+
+        var s = await db.SalonSettings.FirstAsync(ct);
+        s.AboutImageUrl = $"/uploads/{fileName}";
         await db.SaveChangesAsync(ct);
         return Ok(MapSalon(s));
     }
@@ -143,7 +180,7 @@ public class ContentController(BarberDbContext db) : ControllerBase
     }
 
     private static SalonSettingsDto MapSalon(SalonSettings s) =>
-        new(s.BrandName, s.SalonName, s.Address, s.City, s.Phone, s.AboutHtml, s.MapLat, s.MapLon, s.BookingUrl);
+        new(s.BrandName, s.SalonName, s.Address, s.City, s.Phone, s.AboutHtml, s.AboutImageUrl, s.MapLat, s.MapLon, s.BookingUrl);
 
     private static NewsDto MapNews(NewsPost n) =>
         new(n.Id, n.Title, n.Body, n.CoverImageUrl, n.Status.ToString(), n.PublishAtUtc, n.CreatedAtUtc);

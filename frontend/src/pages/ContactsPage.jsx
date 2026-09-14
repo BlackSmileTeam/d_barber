@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
 import api from '../services/api';
-import { apiErrorMessage, useModal } from '../context/ModalContext';
 
 function IconComb({ className }) {
   return (
@@ -36,72 +35,88 @@ function IconTelegram({ className }) {
 
 export default function ContactsPage() {
   const [salon, setSalon] = useState(null);
-  const { show } = useModal();
+  const [failed, setFailed] = useState(false);
+  const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
-    api.get('/salon').then((r) => setSalon(r.data)).catch((e) => show({ title: 'Ошибка', message: apiErrorMessage(e) }));
-  }, [show]);
+    api.get('/salon')
+      .then((r) => {
+        setSalon(r.data);
+        setFailed(false);
+      })
+      .catch(() => {
+        setSalon(null);
+        setFailed(true);
+      })
+      .finally(() => setLoaded(true));
+  }, []);
 
   const mapSrc = useMemo(() => {
-    if (!salon) return '';
+    if (!salon?.address) return '';
     const q = encodeURIComponent(salon.address);
     return `https://yandex.ru/map-widget/v1/?text=${q}&z=16`;
   }, [salon]);
 
   const openMap = () => {
-    if (!salon) return;
+    if (!salon?.address) return;
     window.open(`https://yandex.ru/maps/?text=${encodeURIComponent(salon.address)}`, '_blank');
   };
 
   const route = () => {
-    if (!salon) return;
+    if (!salon?.address) return;
     window.open(`https://yandex.ru/maps/?rtext=~${encodeURIComponent(salon.address)}&rtt=auto`, '_blank');
   };
+
+  const empty = failed || (loaded && !salon);
 
   return (
     <section className="section section-contacts" id="contacts">
       <div className="container">
         <h2>Контакты</h2>
-        <div className="contacts-grid">
-          <div>
-            <p className="contact-line contact-name">
-              <IconComb className="contact-icon" />
-              <span>{salon?.salonName}</span>
-            </p>
-            <p className="contact-line">
-              <IconPin className="contact-icon" />
-              <span>{salon?.address}</span>
-            </p>
-            {salon?.phone && <p className="lead">{salon.phone}</p>}
-            <div className="social-icons">
-              <a
-                href="https://www.instagram.com/Denis_ryabtsov"
-                target="_blank"
-                rel="noreferrer"
-                aria-label="Instagram @Denis_ryabtsov"
-                title="@Denis_ryabtsov"
-              >
-                <IconInstagram />
-              </a>
-              <a
-                href="https://t.me/DenisRyabtsov"
-                target="_blank"
-                rel="noreferrer"
-                aria-label="Telegram @DenisRyabtsov"
-                title="@DenisRyabtsov"
-              >
-                <IconTelegram />
-              </a>
+        {empty ? (
+          <p className="empty-block">Данные отсутствуют</p>
+        ) : (
+          <div className="contacts-grid">
+            <div>
+              <p className="contact-line contact-name">
+                <IconComb className="contact-icon" />
+                <span>{salon?.salonName || 'Данные отсутствуют'}</span>
+              </p>
+              <p className="contact-line">
+                <IconPin className="contact-icon" />
+                <span>{salon?.address || 'Данные отсутствуют'}</span>
+              </p>
+              {salon?.phone && <p className="lead">{salon.phone}</p>}
+              <div className="social-icons">
+                <a
+                  href="https://www.instagram.com/Denis_ryabtsov"
+                  target="_blank"
+                  rel="noreferrer"
+                  aria-label="Instagram @Denis_ryabtsov"
+                  title="@Denis_ryabtsov"
+                >
+                  <IconInstagram />
+                </a>
+                <a
+                  href="https://t.me/DenisRyabtsov"
+                  target="_blank"
+                  rel="noreferrer"
+                  aria-label="Telegram @DenisRyabtsov"
+                  title="@DenisRyabtsov"
+                >
+                  <IconTelegram />
+                </a>
+              </div>
+              <div className="contact-actions">
+                <button type="button" className="btn btn-primary" onClick={openMap} disabled={!salon?.address}>Открыть в Яндекс.Картах</button>
+                <button type="button" className="btn btn-ghost" onClick={route} disabled={!salon?.address}>Построить маршрут</button>
+              </div>
             </div>
-            <div className="contact-actions">
-              <button type="button" className="btn btn-primary" onClick={openMap}>Открыть в Яндекс.Картах</button>
-              <button type="button" className="btn btn-ghost" onClick={route}>Построить маршрут</button>
+            <div className="map-frame">
+              {mapSrc && <iframe title="Яндекс карта" src={mapSrc} loading="lazy" />}
             </div>
           </div>
-          <div className="map-frame">
-            {mapSrc && <iframe title="Яндекс карта" src={mapSrc} loading="lazy" />}
-          </div>
-        </div>
+        )}
       </div>
     </section>
   );

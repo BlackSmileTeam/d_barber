@@ -1,7 +1,8 @@
 import axios from 'axios';
 
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || 'http://localhost:5271/api',
+  // Empty VITE_API_URL in Docker → same-origin /api (nginx proxy). Dev: Vite proxies /api.
+  baseURL: import.meta.env.VITE_API_URL || '/api',
 });
 
 api.interceptors.request.use((config) => {
@@ -26,6 +27,13 @@ export function getAuth() {
   } catch {
     return null;
   }
+}
+
+/** Resolve uploaded or absolute media URLs for <img src>. */
+export function mediaUrl(path) {
+  if (!path) return '';
+  if (/^https?:\/\//i.test(path)) return path;
+  return path.startsWith('/') ? path : `/${path}`;
 }
 
 export default api;

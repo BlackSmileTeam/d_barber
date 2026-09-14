@@ -9,6 +9,7 @@ public static class DbSeeder
     public static async Task SeedAsync(BarberDbContext db)
     {
         await db.Database.EnsureCreatedAsync();
+        await EnsureAboutImageColumnAsync(db);
 
         if (!await db.AdminUsers.AnyAsync())
         {
@@ -26,16 +27,20 @@ public static class DbSeeder
             db.SalonSettings.Add(new SalonSettings
             {
                 Id = Guid.NewGuid(),
-                AboutHtml = "Опыт работы более 3 лет. Работал в сети Barbarossa в Санкт-Петербурге — там отточил темп, чистоту линий и подход к каждому гостю.\n\nСпециализируюсь на мужских стрижках, аккуратных fade и оформлении бороды. Подбираю форму под черты лица, структуру волос и ваш повседневный стиль.\n\nВ работе важны точность переходов, аккуратная окантовка и комфорт в кресле. Расскажу, как поддерживать результат дома, чтобы стрижка держалась дольше."
+                AboutHtml = "Опыт работы более 3 лет. Работал в сети Barbarossa в Санкт-Петербурге — там отточил темп, чистоту линий и подход к каждому гостю.\n\nСпециализируюсь на мужских стрижках, аккуратных fade и оформлении бороды. Подбираю форму под черты лица, структуру волос и ваш повседневный стиль.\n\nВ работе важны точность переходов, аккуратная окантовка и комфорт в кресле. Расскажу, как поддерживать результат дома, чтобы стрижка держалась дольше.",
+                AboutImageUrl = "/images/about-denis.png"
             });
         }
         else
         {
             var settings = await db.SalonSettings.FirstAsync();
-            if (!settings.AboutHtml.Contains("Barbarossa", StringComparison.OrdinalIgnoreCase))
+            if (string.IsNullOrWhiteSpace(settings.AboutHtml)
+                || !settings.AboutHtml.Contains("Barbarossa", StringComparison.OrdinalIgnoreCase))
             {
                 settings.AboutHtml = "Опыт работы более 3 лет. Работал в сети Barbarossa в Санкт-Петербурге — там отточил темп, чистоту линий и подход к каждому гостю.\n\nСпециализируюсь на мужских стрижках, аккуратных fade и оформлении бороды. Подбираю форму под черты лица, структуру волос и ваш повседневный стиль.\n\nВ работе важны точность переходов, аккуратная окантовка и комфорт в кресле. Расскажу, как поддерживать результат дома, чтобы стрижка держалась дольше.";
             }
+            if (string.IsNullOrWhiteSpace(settings.AboutImageUrl))
+                settings.AboutImageUrl = "/images/about-denis.png";
         }
 
         if (!await db.Services.AnyAsync())
@@ -196,5 +201,33 @@ public static class DbSeeder
         }
 
         await db.SaveChangesAsync();
+    }
+
+    /// <summary>
+    /// EnsureCreated does not add columns to existing MySQL tables.
+    /// </summary>
+    private static async Task EnsureAboutImageColumnAsync(BarberDbContext db)
+    {
+        var provider = db.Database.ProviderName ?? "";
+        if (provider.Contains("InMemory", StringComparison.OrdinalIgnoreCase))
+            return;
+
+        try
+        {
+            if (provider.Contains("MySql", StringComparison.OrdinalIgnoreCase))
+            {
+                await db.Database.ExecuteSqlRawAsync(
+                    "ALTER TABLE SalonSettings ADD COLUMN AboutImageUrl VARCHAR(512) NULL");
+            }
+            else if (provider.Contains("Sqlite", StringComparison.OrdinalIgnoreCase))
+            {
+                await db.Database.ExecuteSqlRawAsync(
+                    "ALTER TABLE SalonSettings ADD COLUMN AboutImageUrl TEXT NULL");
+            }
+        }
+        catch
+        {
+            // Column already exists.
+        }
     }
 }

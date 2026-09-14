@@ -116,6 +116,31 @@ button, input, textarea, select { font: inherit; }
 }
 .about-copy .lead { max-width: 38rem; margin-bottom: 1rem; }
 .about-place { color: var(--copper) !important; }
+.about-photo-empty,
+.empty-block {
+  color: var(--muted);
+  margin: 0;
+  padding: .5rem 0;
+}
+.about-photo-empty {
+  display: grid;
+  place-items: center;
+  min-height: 16rem;
+  background: rgba(255,255,255,.04);
+  border: 1px solid rgba(255,255,255,.08);
+}
+.admin-about-photo {
+  display: grid;
+  gap: .75rem;
+  color: var(--muted);
+  font-size: .9rem;
+}
+.admin-about-preview {
+  width: min(100%, 220px);
+  aspect-ratio: 3/4;
+  object-fit: cover;
+  border-radius: 4px;
+}
 
 .auth-page {
   flex: 1;

@@ -9,6 +9,7 @@ public class SalonSettings
     public string City { get; set; } = "Санкт-Петербург";
     public string? Phone { get; set; }
     public string? AboutHtml { get; set; }
+    public string? AboutImageUrl { get; set; }
     public string? MapLat { get; set; } = "59.9343";
     public string? MapLon { get; set; } = "30.3351";
     public string TimeZoneId { get; set; } = "Europe/Moscow";
