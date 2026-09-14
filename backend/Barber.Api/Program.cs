@@ -62,7 +62,20 @@ var app = builder.Build();
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<BarberDbContext>();
-    await DbSeeder.SeedAsync(db);
+    try
+    {
+        await DbSeeder.SeedAsync(db);
+    }
+    catch (Exception ex) when (LooksLikeMysqlAccessDenied(ex))
+    {
+        var log = scope.ServiceProvider.GetRequiredService<ILoggerFactory>().CreateLogger("Startup");
+        log.LogCritical(
+            ex,
+            "MySQL Access Denied for the configured app user (often wrong GitHub secret password, " +
+            "or user exists only as @localhost while Docker connects from 172.18.x). " +
+            "Fix MySQL grants/password (database/05_fix_docker_access.sql) and DB_CONNECTION_STRING, then redeploy.");
+        throw;
+    }
 }
 
 if (app.Environment.IsDevelopment())
@@ -77,5 +90,19 @@ app.UseAuthorization();
 app.MapControllers();
 
 app.Run();
+
+static bool LooksLikeMysqlAccessDenied(Exception ex)
+{
+    for (var e = ex; e != null; e = e.InnerException)
+    {
+        var msg = e.Message;
+        if (msg.Contains("Access denied for user", StringComparison.OrdinalIgnoreCase)
+            || (msg.Contains("caching_sha2_password", StringComparison.OrdinalIgnoreCase)
+                && msg.Contains("Authentication to host", StringComparison.OrdinalIgnoreCase)))
+            return true;
+    }
+
+    return false;
+}
 
 public partial class Program;

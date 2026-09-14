@@ -10,9 +10,9 @@ CREATE DATABASE IF NOT EXISTS dbarber
   CHARACTER SET utf8mb4
   COLLATE utf8mb4_unicode_ci;
 
--- 2) Пользователь приложения
+-- 2) Пользователь приложения ('@%' — для Docker 172.18.x; см. 05_fix_docker_access.sql)
 CREATE USER IF NOT EXISTS 'dbarber_app'@'%' IDENTIFIED BY 'CHANGE_ME_PASSWORD';
--- ALTER USER 'dbarber_app'@'%' IDENTIFIED BY 'CHANGE_ME_PASSWORD';
+ALTER USER 'dbarber_app'@'%' IDENTIFIED BY 'CHANGE_ME_PASSWORD';
 
 GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, ALTER, INDEX, REFERENCES, DROP
   ON dbarber.* TO 'dbarber_app'@'%';
@@ -120,6 +120,7 @@ CREATE TABLE IF NOT EXISTS SalonSettings (
   City VARCHAR(128) NOT NULL,
   Phone VARCHAR(64) NULL,
   AboutHtml TEXT NULL,
+  AboutImageUrl VARCHAR(512) NULL,
   MapLat VARCHAR(32) NULL,
   MapLon VARCHAR(32) NULL,
   TimeZoneId VARCHAR(64) NOT NULL,
