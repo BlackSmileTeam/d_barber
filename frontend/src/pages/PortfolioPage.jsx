@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import api from '../services/api';
+import api, { mediaUrl } from '../services/api';
 
 export default function PortfolioPage() {
   const [items, setItems] = useState([]);
@@ -49,7 +49,7 @@ export default function PortfolioPage() {
             {items.map((item) => (
               <article key={item.id} className="portfolio-item">
                 <button type="button" className="portfolio-thumb" onClick={() => setLightbox(item)}>
-                  <img src={item.imageUrl} alt={item.title} />
+                  <img src={mediaUrl(item.imageUrl)} alt={item.title} />
                 </button>
                 <div className="cap">
                   <strong>{item.title}</strong>
@@ -64,7 +64,7 @@ export default function PortfolioPage() {
       {lightbox && (
         <div className="lightbox-backdrop" onClick={() => setLightbox(null)} role="presentation">
           <figure className="lightbox" onClick={(e) => e.stopPropagation()}>
-            <img src={lightbox.imageUrl} alt={lightbox.title} />
+            <img src={mediaUrl(lightbox.imageUrl)} alt={lightbox.title} />
             <figcaption>
               <strong>{lightbox.title}</strong>
               {lightbox.serviceName || ''}

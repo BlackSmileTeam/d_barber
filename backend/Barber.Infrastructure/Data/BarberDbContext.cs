@@ -52,6 +52,15 @@ public class BarberDbContext : DbContext
         {
             e.HasIndex(x => x.Key).IsUnique();
             e.Property(x => x.Key).HasMaxLength(64);
+            e.Property(x => x.Title).HasMaxLength(255);
+            e.Property(x => x.TriggerDescription).HasMaxLength(512);
+        });
+
+        modelBuilder.Entity<SalonSettings>(e =>
+        {
+            e.Property(x => x.InstagramUrl).HasMaxLength(512);
+            e.Property(x => x.TelegramUrl).HasMaxLength(512);
+            e.Property(x => x.AboutImageUrl).HasMaxLength(512);
         });
 
         modelBuilder.Entity<PortfolioItem>(e =>

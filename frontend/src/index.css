@@ -315,6 +315,32 @@ button, input, textarea, select { font: inherit; }
 .admin-side a { display: block; padding: .55rem .7rem; color: var(--muted); }
 .admin-side a.active, .admin-side a:hover { color: var(--copper); }
 .admin-main { padding: 1.5rem; }
+.admin-card-title { display: block; font-size: 1.05rem; }
+.admin-trigger {
+  margin: .35rem 0 0; color: var(--copper); font-size: .92rem;
+}
+.admin-key { margin: .2rem 0 0; color: var(--muted); font-size: .8rem; }
+.admin-hint { max-width: 42rem; }
+.admin-hint code {
+  font-size: .85em; color: var(--text);
+  background: rgba(255,255,255,.06); padding: .1rem .35rem;
+}
+.admin-form-row {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: .9rem;
+}
+.admin-actions { display: flex; gap: .6rem; flex-wrap: wrap; }
+.admin-check {
+  display: flex !important; align-items: center; gap: .55rem;
+  flex-direction: row !important; color: var(--text) !important;
+}
+.admin-check input { width: auto; }
+.admin-portfolio-preview {
+  width: min(100%, 180px); aspect-ratio: 4/5; object-fit: cover; border-radius: 4px;
+}
+@media (max-width: 720px) {
+  .admin-layout { grid-template-columns: 1fr; }
+  .admin-side { border-right: 0; border-bottom: 1px solid var(--line); }
+}
 .table { width: 100%; border-collapse: collapse; }
 .table th, .table td { text-align: left; padding: .7rem; border-bottom: 1px solid var(--line); font-size: .92rem; }
 .badge { font-size: .75rem; padding: .15rem .45rem; border: 1px solid currentColor; }

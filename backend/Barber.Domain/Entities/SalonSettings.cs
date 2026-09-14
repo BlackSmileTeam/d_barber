@@ -10,6 +10,8 @@ public class SalonSettings
     public string? Phone { get; set; }
     public string? AboutHtml { get; set; }
     public string? AboutImageUrl { get; set; }
+    public string? InstagramUrl { get; set; } = "https://www.instagram.com/Denis_ryabtsov";
+    public string? TelegramUrl { get; set; } = "https://t.me/DenisRyabtsov";
     public string? MapLat { get; set; } = "59.9343";
     public string? MapLon { get; set; } = "30.3351";
     public string TimeZoneId { get; set; } = "Europe/Moscow";

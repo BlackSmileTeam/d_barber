@@ -75,6 +75,76 @@ public class ApiSmokeTests : IClassFixture<BarberApiFactory>
         Assert.Equal(HttpStatusCode.OK, adminLogin.StatusCode);
     }
 
+    [Fact]
+    public async Task Admin_Salon_Socials_And_Templates_And_Portfolio()
+    {
+        var adminLogin = await _client.PostAsJsonAsync("/api/auth/admin/login", new
+        {
+            login = "admin",
+            password = "admin123"
+        });
+        adminLogin.EnsureSuccessStatusCode();
+        var admin = await adminLogin.Content.ReadFromJsonAsync<AuthDto>(JsonOpts);
+        Assert.NotNull(admin?.Token);
+        _client.DefaultRequestHeaders.Authorization =
+            new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", admin.Token);
+
+        var salon = await _client.GetFromJsonAsync<JsonElement>("/api/salon", JsonOpts);
+        Assert.True(salon.TryGetProperty("instagramUrl", out _));
+        Assert.True(salon.TryGetProperty("telegramUrl", out _));
+
+        var templates = await _client.GetFromJsonAsync<List<JsonElement>>("/api/admin/templates", JsonOpts);
+        Assert.NotNull(templates);
+        Assert.True(templates.Count >= 3);
+        Assert.Contains(templates, t => t.GetProperty("triggerDescription").GetString()?.Length > 0);
+
+        var createTpl = await _client.PostAsJsonAsync("/api/admin/templates", new
+        {
+            key = $"promo_{Random.Shared.Next(1000, 9999)}",
+            title = "Тестовый шаблон",
+            triggerDescription = "Только для проверки",
+            body = "Текст {Имя}"
+        });
+        Assert.Equal(HttpStatusCode.OK, createTpl.StatusCode);
+        var createdTpl = await createTpl.Content.ReadFromJsonAsync<JsonElement>(JsonOpts);
+        var tplId = createdTpl.GetProperty("id").GetGuid();
+
+        var delTpl = await _client.DeleteAsync($"/api/admin/templates/{tplId}");
+        Assert.Equal(HttpStatusCode.NoContent, delTpl.StatusCode);
+
+        var createSvc = await _client.PostAsJsonAsync("/api/services", new
+        {
+            name = "Тест услуга",
+            description = "desc",
+            price = 1000,
+            durationMinutes = 30,
+            isActive = true,
+            sortOrder = 99
+        });
+        createSvc.EnsureSuccessStatusCode();
+        var svc = await createSvc.Content.ReadFromJsonAsync<ServiceDto>(JsonOpts);
+        Assert.NotNull(svc);
+
+        var createPort = await _client.PostAsJsonAsync("/api/admin/portfolio", new
+        {
+            title = "Тест портфолио",
+            description = "desc",
+            imageUrl = "https://example.com/a.jpg",
+            serviceId = svc.Id,
+            displayPrice = 1000,
+            sortOrder = 1
+        });
+        Assert.Equal(HttpStatusCode.OK, createPort.StatusCode);
+        var port = await createPort.Content.ReadFromJsonAsync<JsonElement>(JsonOpts);
+        var portId = port.GetProperty("id").GetGuid();
+
+        var delPort = await _client.DeleteAsync($"/api/admin/portfolio/{portId}");
+        Assert.Equal(HttpStatusCode.NoContent, delPort.StatusCode);
+
+        var delSvc = await _client.DeleteAsync($"/api/services/{svc.Id}");
+        Assert.Equal(HttpStatusCode.NoContent, delSvc.StatusCode);
+    }
+
     private sealed record AuthDto(string Token, string Role, string Name, string? Phone, Guid UserId);
     private sealed record ServiceDto(Guid Id, string Name, decimal Price, int DurationMinutes);
     private sealed record SlotsDto(Guid ServiceId, string Date, List<DateTime> SlotsUtc);

@@ -121,6 +121,8 @@ CREATE TABLE IF NOT EXISTS SalonSettings (
   Phone VARCHAR(64) NULL,
   AboutHtml TEXT NULL,
   AboutImageUrl VARCHAR(512) NULL,
+  InstagramUrl VARCHAR(512) NULL,
+  TelegramUrl VARCHAR(512) NULL,
   MapLat VARCHAR(32) NULL,
   MapLon VARCHAR(32) NULL,
   TimeZoneId VARCHAR(64) NOT NULL,
@@ -131,6 +133,7 @@ CREATE TABLE IF NOT EXISTS NotificationTemplates (
   Id CHAR(36) NOT NULL PRIMARY KEY,
   `Key` VARCHAR(64) NOT NULL,
   Title VARCHAR(255) NOT NULL,
+  TriggerDescription VARCHAR(512) NOT NULL DEFAULT '',
   Body TEXT NOT NULL,
   UpdatedAtUtc DATETIME(6) NOT NULL,
   UNIQUE KEY IX_NotificationTemplates_Key (`Key`)

@@ -44,6 +44,8 @@ public class ContentController(BarberDbContext db, IWebHostEnvironment env) : Co
         s.AboutHtml = dto.AboutHtml;
         if (!string.IsNullOrWhiteSpace(dto.AboutImageUrl))
             s.AboutImageUrl = dto.AboutImageUrl;
+        s.InstagramUrl = string.IsNullOrWhiteSpace(dto.InstagramUrl) ? null : dto.InstagramUrl.Trim();
+        s.TelegramUrl = string.IsNullOrWhiteSpace(dto.TelegramUrl) ? null : dto.TelegramUrl.Trim();
         s.MapLat = dto.MapLat;
         s.MapLon = dto.MapLon;
         s.BookingUrl = dto.BookingUrl;
@@ -56,27 +58,11 @@ public class ContentController(BarberDbContext db, IWebHostEnvironment env) : Co
     [RequestSizeLimit(5_000_000)]
     public async Task<ActionResult<SalonSettingsDto>> UploadAboutImage(IFormFile file, CancellationToken ct)
     {
-        if (file is null || file.Length == 0)
-            return BadRequest(new { message = "Файл не выбран" });
-
-        var ext = Path.GetExtension(file.FileName);
-        if (string.IsNullOrWhiteSpace(ext) || !AllowedImageExt.Contains(ext))
-            return BadRequest(new { message = "Допустимы JPG, PNG или WebP" });
-
-        var wwwroot = env.WebRootPath;
-        if (string.IsNullOrWhiteSpace(wwwroot))
-            wwwroot = Path.Combine(env.ContentRootPath, "wwwroot");
-
-        var uploads = Path.Combine(wwwroot, "uploads");
-        Directory.CreateDirectory(uploads);
-
-        var fileName = $"about-{Guid.NewGuid():N}{ext.ToLowerInvariant()}";
-        var fullPath = Path.Combine(uploads, fileName);
-        await using (var stream = System.IO.File.Create(fullPath))
-            await file.CopyToAsync(stream, ct);
+        var url = await SaveUploadAsync(file, "about", ct);
+        if (url.Result is not null) return url.Result;
 
         var s = await db.SalonSettings.FirstAsync(ct);
-        s.AboutImageUrl = $"/uploads/{fileName}";
+        s.AboutImageUrl = url.Value;
         await db.SaveChangesAsync(ct);
         return Ok(MapSalon(s));
     }
@@ -88,8 +74,75 @@ public class ContentController(BarberDbContext db, IWebHostEnvironment env) : Co
             .Include(p => p.Service)
             .OrderBy(p => p.SortOrder)
             .ToListAsync(ct);
-        return Ok(items.Select(p => new PortfolioDto(
-            p.Id, p.Title, p.Description, p.ImageUrl, p.Service?.Name, p.DisplayPrice ?? p.Service?.Price)));
+        return Ok(items.Select(MapPortfolio));
+    }
+
+    [Authorize(Roles = "Admin")]
+    [HttpPost("admin/portfolio")]
+    public async Task<ActionResult<PortfolioDto>> CreatePortfolio(UpsertPortfolioDto dto, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(dto.Title))
+            return BadRequest(new { message = "Укажите название" });
+        if (string.IsNullOrWhiteSpace(dto.ImageUrl))
+            return BadRequest(new { message = "Укажите изображение" });
+
+        var entity = new PortfolioItem
+        {
+            Id = Guid.NewGuid(),
+            Title = dto.Title.Trim(),
+            Description = dto.Description,
+            ImageUrl = dto.ImageUrl.Trim(),
+            ServiceId = dto.ServiceId,
+            DisplayPrice = dto.DisplayPrice,
+            SortOrder = dto.SortOrder
+        };
+        db.PortfolioItems.Add(entity);
+        await db.SaveChangesAsync(ct);
+        await db.Entry(entity).Reference(p => p.Service).LoadAsync(ct);
+        return Ok(MapPortfolio(entity));
+    }
+
+    [Authorize(Roles = "Admin")]
+    [HttpPut("admin/portfolio/{id:guid}")]
+    public async Task<ActionResult<PortfolioDto>> UpdatePortfolio(Guid id, UpsertPortfolioDto dto, CancellationToken ct)
+    {
+        var entity = await db.PortfolioItems.Include(p => p.Service).FirstOrDefaultAsync(p => p.Id == id, ct);
+        if (entity is null) return NotFound();
+        if (string.IsNullOrWhiteSpace(dto.Title))
+            return BadRequest(new { message = "Укажите название" });
+        if (string.IsNullOrWhiteSpace(dto.ImageUrl))
+            return BadRequest(new { message = "Укажите изображение" });
+
+        entity.Title = dto.Title.Trim();
+        entity.Description = dto.Description;
+        entity.ImageUrl = dto.ImageUrl.Trim();
+        entity.ServiceId = dto.ServiceId;
+        entity.DisplayPrice = dto.DisplayPrice;
+        entity.SortOrder = dto.SortOrder;
+        await db.SaveChangesAsync(ct);
+        await db.Entry(entity).Reference(p => p.Service).LoadAsync(ct);
+        return Ok(MapPortfolio(entity));
+    }
+
+    [Authorize(Roles = "Admin")]
+    [HttpDelete("admin/portfolio/{id:guid}")]
+    public async Task<IActionResult> DeletePortfolio(Guid id, CancellationToken ct)
+    {
+        var entity = await db.PortfolioItems.FirstOrDefaultAsync(p => p.Id == id, ct);
+        if (entity is null) return NotFound();
+        db.PortfolioItems.Remove(entity);
+        await db.SaveChangesAsync(ct);
+        return NoContent();
+    }
+
+    [Authorize(Roles = "Admin")]
+    [HttpPost("admin/portfolio/image")]
+    [RequestSizeLimit(5_000_000)]
+    public async Task<ActionResult<object>> UploadPortfolioImage(IFormFile file, CancellationToken ct)
+    {
+        var url = await SaveUploadAsync(file, "portfolio", ct);
+        if (url.Result is not null) return url.Result;
+        return Ok(new { imageUrl = url.Value });
     }
 
     [HttpGet("news")]
@@ -151,7 +204,32 @@ public class ContentController(BarberDbContext db, IWebHostEnvironment env) : Co
     public async Task<ActionResult<IEnumerable<NotificationTemplateDto>>> Templates(CancellationToken ct)
     {
         var items = await db.NotificationTemplates.AsNoTracking().OrderBy(t => t.Key).ToListAsync(ct);
-        return Ok(items.Select(t => new NotificationTemplateDto(t.Id, t.Key, t.Title, t.Body)));
+        return Ok(items.Select(MapTemplate));
+    }
+
+    [Authorize(Roles = "Admin")]
+    [HttpPost("admin/templates")]
+    public async Task<ActionResult<NotificationTemplateDto>> CreateTemplate(CreateNotificationTemplateDto dto, CancellationToken ct)
+    {
+        var key = (dto.Key ?? "").Trim().ToLowerInvariant();
+        if (string.IsNullOrWhiteSpace(key))
+            return BadRequest(new { message = "Укажите ключ шаблона" });
+        if (string.IsNullOrWhiteSpace(dto.Title))
+            return BadRequest(new { message = "Укажите название" });
+        if (await db.NotificationTemplates.AnyAsync(t => t.Key == key, ct))
+            return BadRequest(new { message = "Шаблон с таким ключом уже есть" });
+
+        var entity = new NotificationTemplate
+        {
+            Id = Guid.NewGuid(),
+            Key = key,
+            Title = dto.Title.Trim(),
+            TriggerDescription = (dto.TriggerDescription ?? "").Trim(),
+            Body = dto.Body ?? ""
+        };
+        db.NotificationTemplates.Add(entity);
+        await db.SaveChangesAsync(ct);
+        return Ok(MapTemplate(entity));
     }
 
     [Authorize(Roles = "Admin")]
@@ -161,10 +239,22 @@ public class ContentController(BarberDbContext db, IWebHostEnvironment env) : Co
         var entity = await db.NotificationTemplates.FirstOrDefaultAsync(t => t.Id == id, ct);
         if (entity is null) return NotFound();
         entity.Title = dto.Title;
+        entity.TriggerDescription = dto.TriggerDescription ?? "";
         entity.Body = dto.Body;
         entity.UpdatedAtUtc = DateTime.UtcNow;
         await db.SaveChangesAsync(ct);
-        return Ok(new NotificationTemplateDto(entity.Id, entity.Key, entity.Title, entity.Body));
+        return Ok(MapTemplate(entity));
+    }
+
+    [Authorize(Roles = "Admin")]
+    [HttpDelete("admin/templates/{id:guid}")]
+    public async Task<IActionResult> DeleteTemplate(Guid id, CancellationToken ct)
+    {
+        var entity = await db.NotificationTemplates.FirstOrDefaultAsync(t => t.Id == id, ct);
+        if (entity is null) return NotFound();
+        db.NotificationTemplates.Remove(entity);
+        await db.SaveChangesAsync(ct);
+        return NoContent();
     }
 
     [Authorize(Roles = "Admin")]
@@ -179,8 +269,40 @@ public class ContentController(BarberDbContext db, IWebHostEnvironment env) : Co
         return Ok(new { todayConfirmed = confirmed, cancelledTotal = cancelled, rescheduledTotal = rescheduled });
     }
 
+    private async Task<(string? Value, ActionResult? Result)> SaveUploadAsync(IFormFile file, string prefix, CancellationToken ct)
+    {
+        if (file is null || file.Length == 0)
+            return (null, BadRequest(new { message = "Файл не выбран" }));
+
+        var ext = Path.GetExtension(file.FileName);
+        if (string.IsNullOrWhiteSpace(ext) || !AllowedImageExt.Contains(ext))
+            return (null, BadRequest(new { message = "Допустимы JPG, PNG или WebP" }));
+
+        var wwwroot = env.WebRootPath;
+        if (string.IsNullOrWhiteSpace(wwwroot))
+            wwwroot = Path.Combine(env.ContentRootPath, "wwwroot");
+
+        var uploads = Path.Combine(wwwroot, "uploads");
+        Directory.CreateDirectory(uploads);
+
+        var fileName = $"{prefix}-{Guid.NewGuid():N}{ext.ToLowerInvariant()}";
+        var fullPath = Path.Combine(uploads, fileName);
+        await using (var stream = System.IO.File.Create(fullPath))
+            await file.CopyToAsync(stream, ct);
+
+        return ($"/uploads/{fileName}", null);
+    }
+
     private static SalonSettingsDto MapSalon(SalonSettings s) =>
-        new(s.BrandName, s.SalonName, s.Address, s.City, s.Phone, s.AboutHtml, s.AboutImageUrl, s.MapLat, s.MapLon, s.BookingUrl);
+        new(s.BrandName, s.SalonName, s.Address, s.City, s.Phone, s.AboutHtml, s.AboutImageUrl,
+            s.InstagramUrl, s.TelegramUrl, s.MapLat, s.MapLon, s.BookingUrl);
+
+    private static PortfolioDto MapPortfolio(PortfolioItem p) =>
+        new(p.Id, p.Title, p.Description, p.ImageUrl, p.Service?.Name, p.DisplayPrice ?? p.Service?.Price,
+            p.ServiceId, p.SortOrder);
+
+    private static NotificationTemplateDto MapTemplate(NotificationTemplate t) =>
+        new(t.Id, t.Key, t.Title, t.TriggerDescription, t.Body);
 
     private static NewsDto MapNews(NewsPost n) =>
         new(n.Id, n.Title, n.Body, n.CoverImageUrl, n.Status.ToString(), n.PublishAtUtc, n.CreatedAtUtc);

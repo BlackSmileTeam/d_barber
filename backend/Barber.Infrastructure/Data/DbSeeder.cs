@@ -6,10 +6,32 @@ namespace Barber.Infrastructure.Data;
 
 public static class DbSeeder
 {
+    private static readonly (string Key, string Title, string Trigger, string Body)[] SystemTemplates =
+    [
+        (
+            "booking_created",
+            "Новая запись",
+            "Сразу после создания записи клиентом — уведомление администратору",
+            "Новая запись: {Клиент}, {Услуга}, {Дата} в {Время}. {НазваниеСалона}, {Адрес}."
+        ),
+        (
+            "reminder_2h",
+            "Напоминание за 2 часа",
+            "За 2 часа до начала визита — клиенту в Telegram",
+            "{Имя}, через 2 часа запись на «{Услуга}» — {Дата} в {Время}. Ждём вас в {НазваниеСалона}: {Адрес}."
+        ),
+        (
+            "monthly_comeback",
+            "Ежемесячное напоминание",
+            "Примерно через месяц после визита — приглашение записаться снова",
+            "{Имя}, уже месяц с вашего визита в {НазваниеСалона}. Будем рады снова привести стиль в порядок — запишитесь: {СсылкаНаЗапись}. Ждём вас: {Адрес}."
+        )
+    ];
+
     public static async Task SeedAsync(BarberDbContext db)
     {
         await db.Database.EnsureCreatedAsync();
-        await EnsureAboutImageColumnAsync(db);
+        await EnsureSchemaExtensionsAsync(db);
 
         if (!await db.AdminUsers.AnyAsync())
         {
@@ -28,7 +50,9 @@ public static class DbSeeder
             {
                 Id = Guid.NewGuid(),
                 AboutHtml = "Опыт работы более 3 лет. Работал в сети Barbarossa в Санкт-Петербурге — там отточил темп, чистоту линий и подход к каждому гостю.\n\nСпециализируюсь на мужских стрижках, аккуратных fade и оформлении бороды. Подбираю форму под черты лица, структуру волос и ваш повседневный стиль.\n\nВ работе важны точность переходов, аккуратная окантовка и комфорт в кресле. Расскажу, как поддерживать результат дома, чтобы стрижка держалась дольше.",
-                AboutImageUrl = "/images/about-denis.png"
+                AboutImageUrl = "/images/about-denis.png",
+                InstagramUrl = "https://www.instagram.com/Denis_ryabtsov",
+                TelegramUrl = "https://t.me/DenisRyabtsov"
             });
         }
         else
@@ -41,6 +65,10 @@ public static class DbSeeder
             }
             if (string.IsNullOrWhiteSpace(settings.AboutImageUrl))
                 settings.AboutImageUrl = "/images/about-denis.png";
+            if (string.IsNullOrWhiteSpace(settings.InstagramUrl))
+                settings.InstagramUrl = "https://www.instagram.com/Denis_ryabtsov";
+            if (string.IsNullOrWhiteSpace(settings.TelegramUrl))
+                settings.TelegramUrl = "https://t.me/DenisRyabtsov";
         }
 
         if (!await db.Services.AnyAsync())
@@ -79,29 +107,31 @@ public static class DbSeeder
 
         if (!await db.NotificationTemplates.AnyAsync())
         {
-            db.NotificationTemplates.AddRange(
-                new NotificationTemplate
+            foreach (var t in SystemTemplates)
+            {
+                db.NotificationTemplates.Add(new NotificationTemplate
                 {
                     Id = Guid.NewGuid(),
-                    Key = "booking_created",
-                    Title = "Новая запись",
-                    Body = "Новая запись: {Клиент}, {Услуга}, {Дата} в {Время}. {НазваниеСалона}, {Адрес}."
-                },
-                new NotificationTemplate
-                {
-                    Id = Guid.NewGuid(),
-                    Key = "reminder_2h",
-                    Title = "Напоминание о записи",
-                    Body = "{Имя}, через 2 часа запись на «{Услуга}» — {Дата} в {Время}. Ждём вас в {НазваниеСалона}: {Адрес}."
-                },
-                new NotificationTemplate
-                {
-                    Id = Guid.NewGuid(),
-                    Key = "monthly_comeback",
-                    Title = "Пора освежить стиль",
-                    Body = "{Имя}, уже месяц с вашего визита в {НазваниеСалона}. Будем рады снова привести стиль в порядок — запишитесь: {СсылкаНаЗапись}. Ждём вас: {Адрес}."
-                }
-            );
+                    Key = t.Key,
+                    Title = t.Title,
+                    TriggerDescription = t.Trigger,
+                    Body = t.Body
+                });
+            }
+        }
+        else
+        {
+            foreach (var t in SystemTemplates)
+            {
+                var existing = await db.NotificationTemplates.FirstOrDefaultAsync(x => x.Key == t.Key);
+                if (existing is null) continue;
+                if (string.IsNullOrWhiteSpace(existing.TriggerDescription))
+                    existing.TriggerDescription = t.Trigger;
+                // Keep human-readable titles for system keys if still looking like raw keys
+                if (string.IsNullOrWhiteSpace(existing.Title)
+                    || existing.Title.Equals(t.Key, StringComparison.OrdinalIgnoreCase))
+                    existing.Title = t.Title;
+            }
         }
 
         if (!await db.PortfolioItems.AnyAsync())
@@ -206,28 +236,42 @@ public static class DbSeeder
     /// <summary>
     /// EnsureCreated does not add columns to existing MySQL tables.
     /// </summary>
-    private static async Task EnsureAboutImageColumnAsync(BarberDbContext db)
+    private static async Task EnsureSchemaExtensionsAsync(BarberDbContext db)
     {
         var provider = db.Database.ProviderName ?? "";
         if (provider.Contains("InMemory", StringComparison.OrdinalIgnoreCase))
             return;
 
-        try
-        {
-            if (provider.Contains("MySql", StringComparison.OrdinalIgnoreCase))
+        var isMysql = provider.Contains("MySql", StringComparison.OrdinalIgnoreCase);
+        var isSqlite = provider.Contains("Sqlite", StringComparison.OrdinalIgnoreCase);
+        if (!isMysql && !isSqlite) return;
+
+        var alters = isMysql
+            ? new[]
             {
-                await db.Database.ExecuteSqlRawAsync(
-                    "ALTER TABLE SalonSettings ADD COLUMN AboutImageUrl VARCHAR(512) NULL");
+                "ALTER TABLE SalonSettings ADD COLUMN AboutImageUrl VARCHAR(512) NULL",
+                "ALTER TABLE SalonSettings ADD COLUMN InstagramUrl VARCHAR(512) NULL",
+                "ALTER TABLE SalonSettings ADD COLUMN TelegramUrl VARCHAR(512) NULL",
+                "ALTER TABLE NotificationTemplates ADD COLUMN TriggerDescription VARCHAR(512) NOT NULL DEFAULT ''"
             }
-            else if (provider.Contains("Sqlite", StringComparison.OrdinalIgnoreCase))
+            : new[]
             {
-                await db.Database.ExecuteSqlRawAsync(
-                    "ALTER TABLE SalonSettings ADD COLUMN AboutImageUrl TEXT NULL");
-            }
-        }
-        catch
+                "ALTER TABLE SalonSettings ADD COLUMN AboutImageUrl TEXT NULL",
+                "ALTER TABLE SalonSettings ADD COLUMN InstagramUrl TEXT NULL",
+                "ALTER TABLE SalonSettings ADD COLUMN TelegramUrl TEXT NULL",
+                "ALTER TABLE NotificationTemplates ADD COLUMN TriggerDescription TEXT NOT NULL DEFAULT ''"
+            };
+
+        foreach (var sql in alters)
         {
-            // Column already exists.
+            try
+            {
+                await db.Database.ExecuteSqlRawAsync(sql);
+            }
+            catch
+            {
+                // Column already exists.
+            }
         }
     }
 }

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import api from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
 import { apiErrorMessage, useModal } from '../../context/ModalContext';
@@ -16,25 +16,24 @@ export default function AdminLoginPage() {
     try {
       const { data } = await api.post('/auth/admin/login', { login, password });
       setAuth(data);
-      show({
-        title: 'Админ-вход',
-        message: 'Добро пожаловать в панель D_Barber',
-        actions: [{ label: 'Открыть админку', primary: true, onClick: () => navigate('/admin') }],
-      });
+      navigate('/admin');
     } catch (err) {
       show({ title: 'Ошибка', message: apiErrorMessage(err) });
     }
   };
 
   return (
-    <section className="section">
-      <div className="container">
+    <section className="section auth-page">
+      <div className="auth-card">
         <h2>Вход администратора</h2>
         <form className="form" onSubmit={submit}>
           <label>Логин<input value={login} onChange={(e) => setLogin(e.target.value)} required /></label>
           <label>Пароль<input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required /></label>
           <button className="btn btn-primary" type="submit">Войти</button>
         </form>
+        <p className="auth-links">
+          <Link to="/login">Вход для клиента</Link>
+        </p>
       </div>
     </section>
   );

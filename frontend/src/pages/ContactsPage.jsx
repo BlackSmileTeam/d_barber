@@ -87,26 +87,32 @@ export default function ContactsPage() {
                 <span>{salon?.address || 'Данные отсутствуют'}</span>
               </p>
               {salon?.phone && <p className="lead">{salon.phone}</p>}
-              <div className="social-icons">
-                <a
-                  href="https://www.instagram.com/Denis_ryabtsov"
-                  target="_blank"
-                  rel="noreferrer"
-                  aria-label="Instagram @Denis_ryabtsov"
-                  title="@Denis_ryabtsov"
-                >
-                  <IconInstagram />
-                </a>
-                <a
-                  href="https://t.me/DenisRyabtsov"
-                  target="_blank"
-                  rel="noreferrer"
-                  aria-label="Telegram @DenisRyabtsov"
-                  title="@DenisRyabtsov"
-                >
-                  <IconTelegram />
-                </a>
-              </div>
+              {(salon?.instagramUrl || salon?.telegramUrl) && (
+                <div className="social-icons">
+                  {salon?.instagramUrl && (
+                    <a
+                      href={salon.instagramUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      aria-label="Instagram"
+                      title="Instagram"
+                    >
+                      <IconInstagram />
+                    </a>
+                  )}
+                  {salon?.telegramUrl && (
+                    <a
+                      href={salon.telegramUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      aria-label="Telegram"
+                      title="Telegram"
+                    >
+                      <IconTelegram />
+                    </a>
+                  )}
+                </div>
+              )}
               <div className="contact-actions">
                 <button type="button" className="btn btn-primary" onClick={openMap} disabled={!salon?.address}>Открыть в Яндекс.Картах</button>
                 <button type="button" className="btn btn-ghost" onClick={route} disabled={!salon?.address}>Построить маршрут</button>

@@ -28,7 +28,23 @@ public record AppointmentDto(
     string ClientName,
     string ClientPhone);
 
-public record PortfolioDto(Guid Id, string Title, string? Description, string ImageUrl, string? ServiceName, decimal? DisplayPrice);
+public record PortfolioDto(
+    Guid Id,
+    string Title,
+    string? Description,
+    string ImageUrl,
+    string? ServiceName,
+    decimal? DisplayPrice,
+    Guid? ServiceId,
+    int SortOrder);
+
+public record UpsertPortfolioDto(
+    string Title,
+    string? Description,
+    string ImageUrl,
+    Guid? ServiceId,
+    decimal? DisplayPrice,
+    int SortOrder);
 
 public record NewsDto(Guid Id, string Title, string Body, string? CoverImageUrl, string Status, DateTime? PublishAtUtc, DateTime CreatedAtUtc);
 
@@ -42,10 +58,14 @@ public record SalonSettingsDto(
     string? Phone,
     string? AboutHtml,
     string? AboutImageUrl,
+    string? InstagramUrl,
+    string? TelegramUrl,
     string? MapLat,
     string? MapLon,
     string BookingUrl);
 
-public record NotificationTemplateDto(Guid Id, string Key, string Title, string Body);
+public record NotificationTemplateDto(Guid Id, string Key, string Title, string TriggerDescription, string Body);
+
+public record CreateNotificationTemplateDto(string Key, string Title, string TriggerDescription, string Body);
 
 public record SlotsResponseDto(Guid ServiceId, string Date, IReadOnlyList<DateTime> SlotsUtc);

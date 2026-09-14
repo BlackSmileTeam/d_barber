@@ -55,6 +55,26 @@ public class ServicesController(BarberDbContext db) : ControllerBase
         return Ok(Map(entity));
     }
 
+    [Authorize(Roles = "Admin")]
+    [HttpDelete("{id:guid}")]
+    public async Task<IActionResult> Delete(Guid id, CancellationToken ct)
+    {
+        var entity = await db.Services.FirstOrDefaultAsync(s => s.Id == id, ct);
+        if (entity is null) return NotFound(new { message = "Услуга не найдена" });
+
+        var hasAppointments = await db.Appointments.AnyAsync(a => a.ServiceId == id, ct);
+        if (hasAppointments)
+            return BadRequest(new { message = "Нельзя удалить услугу: есть связанные записи. Снимите галочку «Активна»." });
+
+        var linkedPortfolio = await db.PortfolioItems.Where(p => p.ServiceId == id).ToListAsync(ct);
+        foreach (var item in linkedPortfolio)
+            item.ServiceId = null;
+
+        db.Services.Remove(entity);
+        await db.SaveChangesAsync(ct);
+        return NoContent();
+    }
+
     private static ServiceDto Map(Service s) =>
         new(s.Id, s.Name, s.Description, s.Price, s.DurationMinutes, s.IsActive, s.SortOrder);
 }
