@@ -54,6 +54,7 @@ public class BarberDbContext : DbContext
             e.Property(x => x.Key).HasMaxLength(64);
             e.Property(x => x.Title).HasMaxLength(255);
             e.Property(x => x.TriggerDescription).HasMaxLength(512);
+            e.Property(x => x.TriggerIntervalType).HasConversion<string>().HasMaxLength(32);
         });
 
         modelBuilder.Entity<SalonSettings>(e =>

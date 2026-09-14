@@ -64,8 +64,33 @@ public record SalonSettingsDto(
     string? MapLon,
     string BookingUrl);
 
-public record NotificationTemplateDto(Guid Id, string Key, string Title, string TriggerDescription, string Body);
+public record NotificationTemplateDto(
+    Guid Id,
+    string Key,
+    string Title,
+    string TriggerDescription,
+    string TriggerIntervalType,
+    int? TriggerIntervalDays,
+    string Body);
 
-public record CreateNotificationTemplateDto(string Key, string Title, string TriggerDescription, string Body);
+public record CreateNotificationTemplateDto(
+    string Key,
+    string Title,
+    string TriggerDescription,
+    string TriggerIntervalType,
+    int? TriggerIntervalDays,
+    string Body);
+
+public record AdminClientDto(
+    Guid Id,
+    string Name,
+    string Phone,
+    DateTime CreatedAtUtc,
+    DateTime? LastVisitAtUtc,
+    bool TelegramLinked);
+
+public record ResetClientPasswordDto(string? NewPassword);
+
+public record ResetPasswordResultDto(string Password);
 
 public record SlotsResponseDto(Guid ServiceId, string Date, IReadOnlyList<DateTime> SlotsUtc);

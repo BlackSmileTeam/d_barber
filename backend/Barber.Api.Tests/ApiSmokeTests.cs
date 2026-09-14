@@ -103,14 +103,20 @@ public class ApiSmokeTests : IClassFixture<BarberApiFactory>
             key = $"promo_{Random.Shared.Next(1000, 9999)}",
             title = "Тестовый шаблон",
             triggerDescription = "Только для проверки",
+            triggerIntervalType = "None",
+            triggerIntervalDays = (int?)null,
             body = "Текст {Имя}"
         });
         Assert.Equal(HttpStatusCode.OK, createTpl.StatusCode);
         var createdTpl = await createTpl.Content.ReadFromJsonAsync<JsonElement>(JsonOpts);
+        Assert.Equal("None", createdTpl.GetProperty("triggerIntervalType").GetString());
         var tplId = createdTpl.GetProperty("id").GetGuid();
 
         var delTpl = await _client.DeleteAsync($"/api/admin/templates/{tplId}");
         Assert.Equal(HttpStatusCode.NoContent, delTpl.StatusCode);
+
+        var clients = await _client.GetAsync("/api/admin/clients");
+        Assert.Equal(HttpStatusCode.OK, clients.StatusCode);
 
         var createSvc = await _client.PostAsJsonAsync("/api/services", new
         {

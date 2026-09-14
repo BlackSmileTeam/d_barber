@@ -5,6 +5,7 @@ using Barber.Infrastructure.Data;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using TriggerInterval = Barber.Domain.Enums.TriggerIntervalType;
 
 namespace Barber.Api.Controllers;
 
@@ -219,12 +220,17 @@ public class ContentController(BarberDbContext db, IWebHostEnvironment env) : Co
         if (await db.NotificationTemplates.AnyAsync(t => t.Key == key, ct))
             return BadRequest(new { message = "Шаблон с таким ключом уже есть" });
 
+        if (!TryParseInterval(dto.TriggerIntervalType, dto.TriggerIntervalDays, out var interval, out var days, out var intervalError))
+            return BadRequest(new { message = intervalError });
+
         var entity = new NotificationTemplate
         {
             Id = Guid.NewGuid(),
             Key = key,
             Title = dto.Title.Trim(),
-            TriggerDescription = (dto.TriggerDescription ?? "").Trim(),
+            TriggerDescription = ResolveTriggerDescription(dto.TriggerDescription, interval, days),
+            TriggerIntervalType = interval,
+            TriggerIntervalDays = days,
             Body = dto.Body ?? ""
         };
         db.NotificationTemplates.Add(entity);
@@ -238,8 +244,13 @@ public class ContentController(BarberDbContext db, IWebHostEnvironment env) : Co
     {
         var entity = await db.NotificationTemplates.FirstOrDefaultAsync(t => t.Id == id, ct);
         if (entity is null) return NotFound();
+        if (!TryParseInterval(dto.TriggerIntervalType, dto.TriggerIntervalDays, out var interval, out var days, out var intervalError))
+            return BadRequest(new { message = intervalError });
+
         entity.Title = dto.Title;
-        entity.TriggerDescription = dto.TriggerDescription ?? "";
+        entity.TriggerDescription = ResolveTriggerDescription(dto.TriggerDescription, interval, days);
+        entity.TriggerIntervalType = interval;
+        entity.TriggerIntervalDays = days;
         entity.Body = dto.Body;
         entity.UpdatedAtUtc = DateTime.UtcNow;
         await db.SaveChangesAsync(ct);
@@ -302,8 +313,72 @@ public class ContentController(BarberDbContext db, IWebHostEnvironment env) : Co
             p.ServiceId, p.SortOrder);
 
     private static NotificationTemplateDto MapTemplate(NotificationTemplate t) =>
-        new(t.Id, t.Key, t.Title, t.TriggerDescription, t.Body);
+        new(t.Id, t.Key, t.Title, t.TriggerDescription, t.TriggerIntervalType.ToString(),
+            t.TriggerIntervalDays, t.Body);
 
     private static NewsDto MapNews(NewsPost n) =>
         new(n.Id, n.Title, n.Body, n.CoverImageUrl, n.Status.ToString(), n.PublishAtUtc, n.CreatedAtUtc);
+
+    private static bool TryParseInterval(
+        string? rawType,
+        int? rawDays,
+        out TriggerInterval interval,
+        out int? days,
+        out string? error)
+    {
+        interval = TriggerInterval.None;
+        days = null;
+        error = null;
+
+        if (string.IsNullOrWhiteSpace(rawType))
+        {
+            interval = TriggerInterval.None;
+            days = null;
+            return true;
+        }
+
+        if (!Enum.TryParse(rawType.Trim(), true, out interval))
+        {
+            error = "Укажите тип интервала отправки";
+            return false;
+        }
+
+        if (interval == TriggerInterval.Custom)
+        {
+            if (rawDays is null or < 1)
+            {
+                error = "Укажите число дней для кастомного интервала";
+                return false;
+            }
+
+            days = rawDays;
+            return true;
+        }
+
+        days = interval switch
+        {
+            TriggerInterval.Daily => 1,
+            TriggerInterval.Weekly => 7,
+            TriggerInterval.Monthly => 30,
+            _ => null
+        };
+        return true;
+    }
+
+    private static string ResolveTriggerDescription(string? freeText, TriggerInterval interval, int? days)
+    {
+        var text = (freeText ?? "").Trim();
+        if (interval == TriggerInterval.None)
+            return text;
+
+        var auto = interval switch
+        {
+            TriggerInterval.Daily => "Каждый день после последнего визита",
+            TriggerInterval.Weekly => "Раз в неделю после последнего визита",
+            TriggerInterval.Monthly => "Раз в месяц после последнего визита",
+            TriggerInterval.Custom => $"Через {days} дн. после последнего визита",
+            _ => text
+        };
+        return string.IsNullOrWhiteSpace(text) ? auto : text;
+    }
 }

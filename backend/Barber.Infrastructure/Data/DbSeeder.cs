@@ -6,24 +6,30 @@ namespace Barber.Infrastructure.Data;
 
 public static class DbSeeder
 {
-    private static readonly (string Key, string Title, string Trigger, string Body)[] SystemTemplates =
+    private static readonly (string Key, string Title, string Trigger, TriggerIntervalType Interval, int? Days, string Body)[] SystemTemplates =
     [
         (
             "booking_created",
             "Новая запись",
             "Сразу после создания записи клиентом — уведомление администратору",
+            TriggerIntervalType.None,
+            null,
             "Новая запись: {Клиент}, {Услуга}, {Дата} в {Время}. {НазваниеСалона}, {Адрес}."
         ),
         (
             "reminder_2h",
             "Напоминание за 2 часа",
             "За 2 часа до начала визита — клиенту в Telegram",
+            TriggerIntervalType.None,
+            null,
             "{Имя}, через 2 часа запись на «{Услуга}» — {Дата} в {Время}. Ждём вас в {НазваниеСалона}: {Адрес}."
         ),
         (
             "monthly_comeback",
             "Ежемесячное напоминание",
-            "Примерно через месяц после визита — приглашение записаться снова",
+            "Раз в месяц после последнего визита",
+            TriggerIntervalType.Monthly,
+            30,
             "{Имя}, уже месяц с вашего визита в {НазваниеСалона}. Будем рады снова привести стиль в порядок — запишитесь: {СсылкаНаЗапись}. Ждём вас: {Адрес}."
         )
     ];
@@ -115,6 +121,8 @@ public static class DbSeeder
                     Key = t.Key,
                     Title = t.Title,
                     TriggerDescription = t.Trigger,
+                    TriggerIntervalType = t.Interval,
+                    TriggerIntervalDays = t.Days,
                     Body = t.Body
                 });
             }
@@ -127,7 +135,14 @@ public static class DbSeeder
                 if (existing is null) continue;
                 if (string.IsNullOrWhiteSpace(existing.TriggerDescription))
                     existing.TriggerDescription = t.Trigger;
-                // Keep human-readable titles for system keys if still looking like raw keys
+                if (existing.TriggerIntervalType == TriggerIntervalType.None && t.Interval != TriggerIntervalType.None)
+                {
+                    existing.TriggerIntervalType = t.Interval;
+                    existing.TriggerIntervalDays = t.Days;
+                    if (string.IsNullOrWhiteSpace(existing.TriggerDescription)
+                        || existing.TriggerDescription.Contains("примерно через месяц", StringComparison.OrdinalIgnoreCase))
+                        existing.TriggerDescription = t.Trigger;
+                }
                 if (string.IsNullOrWhiteSpace(existing.Title)
                     || existing.Title.Equals(t.Key, StringComparison.OrdinalIgnoreCase))
                     existing.Title = t.Title;
@@ -252,14 +267,18 @@ public static class DbSeeder
                 "ALTER TABLE SalonSettings ADD COLUMN AboutImageUrl VARCHAR(512) NULL",
                 "ALTER TABLE SalonSettings ADD COLUMN InstagramUrl VARCHAR(512) NULL",
                 "ALTER TABLE SalonSettings ADD COLUMN TelegramUrl VARCHAR(512) NULL",
-                "ALTER TABLE NotificationTemplates ADD COLUMN TriggerDescription VARCHAR(512) NOT NULL DEFAULT ''"
+                "ALTER TABLE NotificationTemplates ADD COLUMN TriggerDescription VARCHAR(512) NOT NULL DEFAULT ''",
+                "ALTER TABLE NotificationTemplates ADD COLUMN TriggerIntervalType VARCHAR(32) NOT NULL DEFAULT 'None'",
+                "ALTER TABLE NotificationTemplates ADD COLUMN TriggerIntervalDays INT NULL"
             }
             : new[]
             {
                 "ALTER TABLE SalonSettings ADD COLUMN AboutImageUrl TEXT NULL",
                 "ALTER TABLE SalonSettings ADD COLUMN InstagramUrl TEXT NULL",
                 "ALTER TABLE SalonSettings ADD COLUMN TelegramUrl TEXT NULL",
-                "ALTER TABLE NotificationTemplates ADD COLUMN TriggerDescription TEXT NOT NULL DEFAULT ''"
+                "ALTER TABLE NotificationTemplates ADD COLUMN TriggerDescription TEXT NOT NULL DEFAULT ''",
+                "ALTER TABLE NotificationTemplates ADD COLUMN TriggerIntervalType TEXT NOT NULL DEFAULT 'None'",
+                "ALTER TABLE NotificationTemplates ADD COLUMN TriggerIntervalDays INTEGER NULL"
             };
 
         foreach (var sql in alters)
