@@ -25,25 +25,29 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.x'
-      - name: API tests (required)
+
+      - name: API tests (required for publish)
         working-directory: backend
         run: |
           set -euo pipefail
           if [ -z "$(find . -name '*.Tests.csproj' -type f | head -1)" ]; then
-            echo "API tests are required"
+            echo "API tests are required — no *.Tests.csproj found"
             exit 1
           fi
           dotnet restore
           dotnet build -c Release --no-restore
           dotnet test -c Release --no-build --verbosity normal
+
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
           cache: npm
           cache-dependency-path: frontend/package-lock.json
+
       - name: Frontend build
         working-directory: frontend
         run: npm ci && npm run build
@@ -54,17 +58,22 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Validate repo secrets
+      - name: Validate secrets
         run: |
           set -e
           missing=0
-          [ -z "${{ secrets.JWT_KEY }}" ] && echo "Missing JWT_KEY" && missing=1 || true
+          [ -z "${{ secrets.PROD_HOST }}" ] && echo "Missing PROD_HOST (org)" && missing=1 || true
+          [ -z "${{ secrets.PROD_USER }}" ] && echo "Missing PROD_USER (org)" && missing=1 || true
+          [ -z "${{ secrets.PROD_SSH_PRIVATE_KEY }}" ] && echo "Missing PROD_SSH_PRIVATE_KEY (org)" && missing=1 || true
+          [ -z "${{ secrets.PROD_SSH_PORT }}" ] && echo "Missing PROD_SSH_PORT (org)" && missing=1 || true
+          [ -z "${{ secrets.JWT_KEY }}" ] && echo "Missing JWT_KEY (repo)" && missing=1 || true
           if [ -z "${{ secrets.DB_CONNECTION_STRING }}" ] && [ -z "${{ secrets.APP_CONNECTION_STRING }}" ]; then
-            echo "Missing DB_CONNECTION_STRING or APP_CONNECTION_STRING"
+            echo "Missing DB_CONNECTION_STRING or APP_CONNECTION_STRING (repo)"
             missing=1
           fi
+          [ -z "${{ secrets.FRONTEND_PUBLIC_URL }}" ] && echo "Missing FRONTEND_PUBLIC_URL (repo) — use http://139.100.225.234:55333" && missing=1 || true
           [ "$missing" -ne 0 ] && exit 1
-          echo "Repo secrets OK (PROD_* expected from org)"
+          echo "Secrets OK"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -91,10 +100,12 @@ jobs:
           build-args: |
             VITE_API_URL=
 
-      - name: Save images
+      - name: Save images to workspace
         run: |
-          docker save ${{ env.BACKEND_IMAGE }}:latest | gzip > /tmp/${{ env.BACKEND_IMAGE }}.tar.gz
-          docker save ${{ env.FRONTEND_IMAGE }}:latest | gzip > /tmp/${{ env.FRONTEND_IMAGE }}.tar.gz
+          mkdir -p artifacts
+          docker save ${{ env.BACKEND_IMAGE }}:latest | gzip > artifacts/${{ env.BACKEND_IMAGE }}.tar.gz
+          docker save ${{ env.FRONTEND_IMAGE }}:latest | gzip > artifacts/${{ env.FRONTEND_IMAGE }}.tar.gz
+          ls -lh artifacts/
 
       - name: Upload images to server
         uses: appleboy/scp-action@v1.0.0
@@ -103,68 +114,93 @@ jobs:
           username: ${{ secrets.PROD_USER }}
           key: ${{ secrets.PROD_SSH_PRIVATE_KEY }}
           port: ${{ secrets.PROD_SSH_PORT }}
-          source: "/tmp/${{ env.BACKEND_IMAGE }}.tar.gz,/tmp/${{ env.FRONTEND_IMAGE }}.tar.gz"
-          target: "/tmp"
+          source: "artifacts/${{ env.BACKEND_IMAGE }}.tar.gz,artifacts/${{ env.FRONTEND_IMAGE }}.tar.gz"
+          target: "/tmp/dbarber-images"
+          strip_components: 1
           overwrite: true
 
-      - name: Run containers
+      - name: Load images and run containers
         uses: appleboy/ssh-action@v1.2.5
+        env:
+          JWT_ISSUER: ${{ secrets.JWT_ISSUER }}
+          JWT_AUDIENCE: ${{ secrets.JWT_AUDIENCE }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_ADMIN_CHAT_ID: ${{ secrets.TELEGRAM_ADMIN_CHAT_ID }}
         with:
           host: ${{ secrets.PROD_HOST }}
           username: ${{ secrets.PROD_USER }}
           key: ${{ secrets.PROD_SSH_PRIVATE_KEY }}
           port: ${{ secrets.PROD_SSH_PORT }}
           command_timeout: 30m
+          envs: JWT_ISSUER,JWT_AUDIENCE,TELEGRAM_BOT_TOKEN,TELEGRAM_ADMIN_CHAT_ID
           script: |
             set -euo pipefail
             DEPLOY_ROOT="${{ env.DEPLOY_ROOT }}"
+            BACKEND_IMAGE="${{ env.BACKEND_IMAGE }}"
+            FRONTEND_IMAGE="${{ env.FRONTEND_IMAGE }}"
+            BACKEND_HOST_PORT="${{ env.BACKEND_HOST_PORT }}"
+            FRONTEND_HOST_PORT="${{ env.FRONTEND_HOST_PORT }}"
+            BACKEND_CONTAINER_PORT="${{ env.BACKEND_CONTAINER_PORT }}"
+            JWT_ISSUER="${JWT_ISSUER:-DBarberApi}"
+            JWT_AUDIENCE="${JWT_AUDIENCE:-DBarberClient}"
+
             mkdir -p "$DEPLOY_ROOT/wwwroot/uploads" "$DEPLOY_ROOT/logs"
             CONN='${{ secrets.DB_CONNECTION_STRING }}'
             if [ -z "$CONN" ]; then CONN='${{ secrets.APP_CONNECTION_STRING }}'; fi
 
-            docker load < /tmp/${{ env.BACKEND_IMAGE }}.tar.gz
-            docker load < /tmp/${{ env.FRONTEND_IMAGE }}.tar.gz
-            rm -f /tmp/${{ env.BACKEND_IMAGE }}.tar.gz /tmp/${{ env.FRONTEND_IMAGE }}.tar.gz
+            test -f "/tmp/dbarber-images/${BACKEND_IMAGE}.tar.gz"
+            test -f "/tmp/dbarber-images/${FRONTEND_IMAGE}.tar.gz"
+            docker load < "/tmp/dbarber-images/${BACKEND_IMAGE}.tar.gz"
+            docker load < "/tmp/dbarber-images/${FRONTEND_IMAGE}.tar.gz"
+            rm -f "/tmp/dbarber-images/${BACKEND_IMAGE}.tar.gz" "/tmp/dbarber-images/${FRONTEND_IMAGE}.tar.gz"
 
             docker network inspect dbarber-net >/dev/null 2>&1 || docker network create dbarber-net
 
-            docker stop ${{ env.BACKEND_IMAGE }} 2>/dev/null || true
-            docker rm -f ${{ env.BACKEND_IMAGE }} 2>/dev/null || true
+            docker stop "$BACKEND_IMAGE" 2>/dev/null || true
+            docker rm -f "$BACKEND_IMAGE" 2>/dev/null || true
             docker run -d \
-              --name ${{ env.BACKEND_IMAGE }} \
+              --name "$BACKEND_IMAGE" \
               --restart unless-stopped \
               --network dbarber-net \
               --add-host=host.docker.internal:host-gateway \
-              -p ${{ env.BACKEND_HOST_PORT }}:${{ env.BACKEND_CONTAINER_PORT }} \
+              -p "${BACKEND_HOST_PORT}:${BACKEND_CONTAINER_PORT}" \
               -v "$DEPLOY_ROOT/wwwroot:/app/wwwroot" \
               -e ASPNETCORE_ENVIRONMENT=Production \
               -e Database__Provider=MySql \
               -e ConnectionStrings__DefaultConnection="$CONN" \
               -e Jwt__Key='${{ secrets.JWT_KEY }}' \
-              -e Jwt__Issuer='${{ secrets.JWT_ISSUER }}' \
-              -e Jwt__Audience='${{ secrets.JWT_AUDIENCE }}' \
-              -e Telegram__BotToken='${{ secrets.TELEGRAM_BOT_TOKEN }}' \
-              -e Telegram__AdminChatId='${{ secrets.TELEGRAM_ADMIN_CHAT_ID }}' \
+              -e Jwt__Issuer="$JWT_ISSUER" \
+              -e Jwt__Audience="$JWT_AUDIENCE" \
+              -e Telegram__BotToken="${TELEGRAM_BOT_TOKEN:-}" \
+              -e Telegram__AdminChatId="${TELEGRAM_ADMIN_CHAT_ID:-}" \
               -e App__FrontendPublicUrl='${{ secrets.FRONTEND_PUBLIC_URL }}' \
-              ${{ env.BACKEND_IMAGE }}:latest
+              "$BACKEND_IMAGE:latest"
 
-            docker stop ${{ env.FRONTEND_IMAGE }} 2>/dev/null || true
-            docker rm -f ${{ env.FRONTEND_IMAGE }} 2>/dev/null || true
+            docker stop "$FRONTEND_IMAGE" 2>/dev/null || true
+            docker rm -f "$FRONTEND_IMAGE" 2>/dev/null || true
             docker run -d \
-              --name ${{ env.FRONTEND_IMAGE }} \
+              --name "$FRONTEND_IMAGE" \
               --restart unless-stopped \
               --network dbarber-net \
-              -p ${{ env.FRONTEND_HOST_PORT }}:80 \
-              ${{ env.FRONTEND_IMAGE }}:latest
+              -p "${FRONTEND_HOST_PORT}:80" \
+              "$FRONTEND_IMAGE:latest"
 
-            sleep 5
-            docker ps --filter name=dbarber
-            CODE=$(curl -sS -o /tmp/health.txt -w "%{http_code}" --max-time 30 http://127.0.0.1:${{ env.BACKEND_HOST_PORT }}/api/health || echo 000)
-            echo "health HTTP $CODE"
-            test "$CODE" = "200"
+            sleep 6
+            docker ps --filter name=dbarber --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'
+            CODE=$(curl -sS -o /tmp/dbarber-health.txt -w "%{http_code}" --max-time 45 "http://127.0.0.1:${BACKEND_HOST_PORT}/api/health" || echo 000)
+            echo "GET /api/health => HTTP $CODE"
+            cat /tmp/dbarber-health.txt || true
+            echo
+            if [ "$CODE" != "200" ]; then
+              docker logs --tail 80 "$BACKEND_IMAGE" || true
+              exit 1
+            fi
 
       - name: Summary
         run: |
-          echo "## D_Barber deploy" >> "$GITHUB_STEP_SUMMARY"
-          echo "- API: host port **${{ env.BACKEND_HOST_PORT }}**" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Frontend: host port **${{ env.FRONTEND_HOST_PORT }}**" >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo "## D_Barber deploy"
+            echo "- API: \`http://${{ secrets.PROD_HOST }}:${{ env.BACKEND_HOST_PORT }}\`"
+            echo "- Frontend: \`http://${{ secrets.PROD_HOST }}:${{ env.FRONTEND_HOST_PORT }}\`"
+            echo "- FRONTEND_PUBLIC_URL secret must match frontend URL"
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -1,41 +1,47 @@
 # GitHub Secrets for BlackSmileTeam/d_barber
 #
-# Уже есть на уровне Organization (создавать в репозитории НЕ нужно):
+# Organization secrets (уже есть — в репозитории НЕ создавать):
 #   PROD_HOST
 #   PROD_USER
 #   PROD_SSH_PRIVATE_KEY
 #   PROD_SSH_PORT
 #
-# Создайте в Settings → Secrets and variables → Actions → Repository secrets:
+# Repository secrets → Settings → Secrets and variables → Actions
 
 ## Обязательные (repository)
 
-| Name | Описание |
+| Name | Значение |
 |------|----------|
-| `JWT_KEY` | Секрет подписи JWT, ≥ 32 символов |
-| `DB_CONNECTION_STRING` | MySQL connection string для `dbarber` / `dbarber_app` |
+| `JWT_KEY` | случайная строка ≥ 32 символов |
+| `DB_CONNECTION_STRING` | см. ниже |
+| `FRONTEND_PUBLIC_URL` | **`http://139.100.225.234:55333`** |
 
-Пример connection string (API в Docker на том же хосте, MySQL на хосте):
+`FRONTEND_PUBLIC_URL` — публичный URL фронта на том же сервере, что и MySQL (пока без домена).  
+После появления домена/HTTPS замените на `https://ваш-домен`.
+
+Connection string (API в Docker, MySQL на хосте):
 
 ```
 server=host.docker.internal;port=3306;database=dbarber;user=dbarber_app;password=ВАШ_ПАРОЛЬ;Allow User Variables=True
 ```
 
-Альтернативное имя (если так привычнее): `APP_CONNECTION_STRING` — подойдёт вместо `DB_CONNECTION_STRING`.
+Допустимо вместо `DB_CONNECTION_STRING` использовать `APP_CONNECTION_STRING`.
 
-## Рекомендуемые (repository)
+## Опциональные (repository)
 
-| Name | Описание | Пример |
-|------|----------|--------|
-| `JWT_ISSUER` | Issuer JWT | `DBarberApi` |
-| `JWT_AUDIENCE` | Audience JWT | `DBarberClient` |
-| `FRONTEND_PUBLIC_URL` | Публичный URL сайта | `http://139.100.225.234:55333` (пока без домена; тот же сервер, что и MySQL) |
-| `TELEGRAM_BOT_TOKEN` | Токен бота от @BotFather | |
-| `TELEGRAM_ADMIN_CHAT_ID` | Chat id админа для уведомлений о записях | |
+| Name | Default / пример |
+|------|------------------|
+| `JWT_ISSUER` | `DBarberApi` |
+| `JWT_AUDIENCE` | `DBarberClient` |
+| `TELEGRAM_BOT_TOKEN` | токен бота |
+| `TELEGRAM_ADMIN_CHAT_ID` | chat id админа |
 
-## Не создавать (org уже даёт)
+## Порты после деплоя
 
-- `PROD_HOST`
-- `PROD_USER`
-- `PROD_SSH_PRIVATE_KEY`
-- `PROD_SSH_PORT`
+| Сервис | URL |
+|--------|-----|
+| Frontend | http://139.100.225.234:55333 |
+| API | http://139.100.225.234:55332 |
+| Health | http://139.100.225.234:55332/api/health |
+
+Публикация только через GitHub Actions (`.github/workflows/deploy.yml`), не вручную по SSH.
