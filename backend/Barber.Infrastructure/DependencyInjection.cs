@@ -11,8 +11,9 @@ public static class DependencyInjection
     public static IServiceCollection AddInfrastructure(this IServiceCollection services, IConfiguration configuration)
     {
         var provider = configuration["Database:Provider"] ?? "Sqlite";
-        var connectionString = configuration.GetConnectionString("DefaultConnection")
-            ?? "Data Source=dbarber.db";
+        var connectionString = NormalizeMySqlConnectionString(
+            configuration.GetConnectionString("DefaultConnection")
+            ?? "Data Source=dbarber.db");
 
         services.AddDbContext<BarberDbContext>(options =>
         {
@@ -29,5 +30,18 @@ public static class DependencyInjection
         services.AddScoped<TelegramNotifyService>();
 
         return services;
+    }
+
+    /// <summary>
+    /// Oracle MySql.Data rejects Pomelo-style SslMode=None; map to Disabled.
+    /// </summary>
+    internal static string NormalizeMySqlConnectionString(string connectionString)
+    {
+        if (string.IsNullOrWhiteSpace(connectionString))
+            return connectionString;
+
+        return connectionString
+            .Replace("SslMode=None", "SslMode=Disabled", StringComparison.OrdinalIgnoreCase)
+            .Replace("Ssl Mode=None", "Ssl Mode=Disabled", StringComparison.OrdinalIgnoreCase);
     }
 }
