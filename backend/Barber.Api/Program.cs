@@ -39,12 +39,22 @@ builder.Services.AddAuthorization();
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("frontend", p =>
-        p.WithOrigins(
-                "http://localhost:5173",
-                "http://127.0.0.1:5173",
-                "http://localhost:4173")
+    {
+        var origins = new List<string>
+        {
+            "http://localhost:5173",
+            "http://127.0.0.1:5173",
+            "http://localhost:4173",
+            "http://139.100.225.234:55333"
+        };
+        var publicUrl = builder.Configuration["App:FrontendPublicUrl"];
+        if (!string.IsNullOrWhiteSpace(publicUrl))
+            origins.Add(publicUrl.TrimEnd('/'));
+
+        p.WithOrigins(origins.Distinct().ToArray())
             .AllowAnyHeader()
-            .AllowAnyMethod());
+            .AllowAnyMethod();
+    });
 });
 
 var app = builder.Build();

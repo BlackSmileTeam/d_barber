@@ -22,10 +22,10 @@
 Connection string (API в Docker, MySQL на хосте):
 
 ```
-server=host.docker.internal;port=3306;database=dbarber;user=dbarber_app;password=ВАШ_ПАРОЛЬ;Allow User Variables=True
+Server=host.docker.internal;Port=3306;Database=dbarber;User Id=dbarber_app;Password=ВАШ_ПАРОЛЬ;SslMode=None;AllowPublicKeyRetrieval=True
 ```
 
-Допустимо вместо `DB_CONNECTION_STRING` использовать `APP_CONNECTION_STRING`.
+Важно: контейнеры D_Barber подключаются к сети **`bebochka-edge`** (как bebochka), чтобы UFW уже разрешал доступ к MySQL. Сервисы bebochka пайплайн **не останавливает**.
 
 ## Опциональные (repository)
 
