@@ -32,4 +32,4 @@ npm run dev
 ## CI/CD
 
 - `.github/workflows/ci.yml` — build + обязательные API-тесты  
-- `.github/workflows/deploy.yml` — после успешного CI деплой API/frontend на Selectel (порты 55511 / 55512)
+- `.github/workflows/deploy.yml` — после успешного CI деплой API/frontend на Selectel (порты **55332** API / **55333** frontend)

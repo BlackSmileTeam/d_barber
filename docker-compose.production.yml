@@ -19,7 +19,7 @@ services:
       Telegram__AdminChatId: ${TELEGRAM_ADMIN_CHAT_ID:-}
       App__FrontendPublicUrl: ${FRONTEND_PUBLIC_URL:-}
     ports:
-      - "${BACKEND_PORT:-55511}:44315"
+      - "${BACKEND_PORT:-55332}:44315"
 
   frontend:
     build:
@@ -32,4 +32,4 @@ services:
     depends_on:
       - backend
     ports:
-      - "${FRONTEND_PORT:-55512}:80"
+      - "${FRONTEND_PORT:-55333}:80"

@@ -29,7 +29,7 @@ server=host.docker.internal;port=3306;database=dbarber;user=dbarber_app;password
 |------|----------|--------|
 | `JWT_ISSUER` | Issuer JWT | `DBarberApi` |
 | `JWT_AUDIENCE` | Audience JWT | `DBarberClient` |
-| `FRONTEND_PUBLIC_URL` | Публичный URL сайта (когда появится домен) | `https://dbarber.example` |
+| `FRONTEND_PUBLIC_URL` | Публичный URL сайта | `http://139.100.225.234:55333` (пока без домена; тот же сервер, что и MySQL) |
 | `TELEGRAM_BOT_TOKEN` | Токен бота от @BotFather | |
 | `TELEGRAM_ADMIN_CHAT_ID` | Chat id админа для уведомлений о записях | |
 
