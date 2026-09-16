@@ -145,8 +145,14 @@ export default function BookPage() {
   return (
     <section className="section section-book reveal" id="book">
       <div className="container">
-        <h2>Онлайн-запись</h2>
-        <p className="lead section-kicker">Выбери услугу и удобное время.</p>
+        <div className="section-head">
+          <span className="section-index" aria-hidden="true">04</span>
+          <div>
+            <h2>Онлайн-запись</h2>
+            <p className="lead section-kicker">Выбери услугу и удобное время.</p>
+          </div>
+        </div>
+        <div className="section-rule" aria-hidden="true" />
 
         {(loadFailed || (loaded && services.length === 0)) ? (
           <p className="empty-block">Данные отсутствуют</p>
@@ -160,7 +166,7 @@ export default function BookPage() {
           </div>
         )}
 
-        <div className="booking-stage">
+        <div className="booking-stage reveal-child" style={{ '--reveal-delay': '0.12s' }}>
           <div className="booking-stage-body">
             {!canBook && (
               <ServiceList services={services} selectable={false} />
@@ -223,23 +229,23 @@ export default function BookPage() {
           <div className="booking-stage-actions">
             {!canBook && (
               <>
-                <Link className="btn btn-primary" to="/login">Войти</Link>
+                <Link className="btn btn-primary btn-cta" to="/login">Войти</Link>
                 <Link className="btn btn-ghost" to="/register">Зарегистрироваться</Link>
               </>
             )}
             {canBook && step === 1 && (
-              <button type="button" className="btn btn-primary" disabled={!service} onClick={() => setStep(2)}>Далее</button>
+              <button type="button" className="btn btn-primary btn-cta" disabled={!service} onClick={() => setStep(2)}>Далее</button>
             )}
             {canBook && step === 2 && (
               <>
                 <button type="button" className="btn btn-ghost" onClick={() => setStep(1)}>Назад</button>
-                <button type="button" className="btn btn-primary" disabled={!slot} onClick={() => setStep(3)}>Далее</button>
+                <button type="button" className="btn btn-primary btn-cta" disabled={!slot} onClick={() => setStep(3)}>Далее</button>
               </>
             )}
             {canBook && step === 3 && (
               <>
                 <button type="button" className="btn btn-ghost" onClick={() => setStep(2)}>Назад</button>
-                <button type="button" className="btn btn-primary" onClick={confirm}>Подтвердить запись</button>
+                <button type="button" className="btn btn-primary btn-cta" onClick={confirm}>Подтвердить запись</button>
               </>
             )}
           </div>

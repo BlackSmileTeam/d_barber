@@ -27,21 +27,31 @@ export default function AboutPage() {
 
   return (
     <section className="section section-about reveal" id="about">
+      <div className="about-glow" aria-hidden="true" />
       <div className="container">
-        <h2>Обо мне</h2>
-        <p className="lead section-kicker">Мастер, место и подход.</p>
+        <div className="section-head">
+          <span className="section-index" aria-hidden="true">02</span>
+          <div>
+            <h2>Обо мне</h2>
+            <p className="lead section-kicker">Мастер, место и подход.</p>
+          </div>
+        </div>
+        <div className="section-rule" aria-hidden="true" />
         {missing ? (
           <p className="empty-block">Данные отсутствуют</p>
         ) : (
           <div className="about-layout">
-            <div className="about-photo">
-              {photo ? (
-                <img src={photo} alt={salon?.brandName || 'D_Barber'} />
-              ) : (
-                <div className="about-photo-empty">Данные отсутствуют</div>
-              )}
+            <div className="about-photo-wrap reveal-child" style={{ '--reveal-delay': '0.1s' }}>
+              <div className="about-photo-frame" aria-hidden="true" />
+              <div className="about-photo">
+                {photo ? (
+                  <img src={photo} alt={salon?.brandName || 'D_Barber'} />
+                ) : (
+                  <div className="about-photo-empty">Данные отсутствуют</div>
+                )}
+              </div>
             </div>
-            <div className="about-copy">
+            <div className="about-copy reveal-child" style={{ '--reveal-delay': '0.22s' }}>
               {paragraphs.length > 0 ? (
                 paragraphs.map((p) => (
                   <p key={p.slice(0, 24)} className="lead">{p}</p>

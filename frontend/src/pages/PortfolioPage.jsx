@@ -34,9 +34,12 @@ export default function PortfolioPage() {
     <section className="section section-portfolio reveal" id="portfolio">
       <div className="container">
         <div className="portfolio-head">
-          <div>
-            <h2>Портфолио</h2>
-            <p className="lead section-kicker">Работы, которые говорят сами за себя.</p>
+          <div className="section-head">
+            <span className="section-index" aria-hidden="true">03</span>
+            <div>
+              <h2>Портфолио</h2>
+              <p className="lead section-kicker">Работы, которые говорят сами за себя.</p>
+            </div>
           </div>
           {!empty && (
             <div className="carousel-nav">
@@ -45,14 +48,20 @@ export default function PortfolioPage() {
             </div>
           )}
         </div>
+        <div className="section-rule" aria-hidden="true" />
         {empty ? (
           <p className="empty-block">Данные отсутствуют</p>
         ) : (
           <div className="portfolio-carousel" ref={trackRef}>
-            {items.map((item) => (
-              <article key={item.id} className="portfolio-item">
+            {items.map((item, i) => (
+              <article
+                key={item.id}
+                className="portfolio-item reveal-child"
+                style={{ '--reveal-delay': `${0.06 + i * 0.05}s` }}
+              >
                 <button type="button" className="portfolio-thumb" onClick={() => setLightbox(item)}>
                   <img src={mediaUrl(item.imageUrl)} alt={item.title} />
+                  <span className="portfolio-shine" aria-hidden="true" />
                 </button>
                 <div className="cap">
                   <strong>{item.title}</strong>

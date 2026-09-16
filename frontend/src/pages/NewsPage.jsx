@@ -24,15 +24,29 @@ export default function NewsPage() {
   return (
     <section className="section section-news reveal" id="news">
       <div className="container">
-        <h2>Новости</h2>
-        <p className="lead section-kicker">Что нового в D_Barber.</p>
+        <div className="section-head">
+          <span className="section-index" aria-hidden="true">01</span>
+          <div>
+            <h2>Новости</h2>
+            <p className="lead section-kicker">Что нового в D_Barber.</p>
+          </div>
+        </div>
+        <div className="section-rule" aria-hidden="true" />
         {empty ? (
           <p className="empty-block">Данные отсутствуют</p>
         ) : (
           <div className="news-list">
-            {items.map((n) => (
-              <article key={n.id} className="news-card">
-                {n.coverImageUrl ? <img src={n.coverImageUrl} alt="" /> : null}
+            {items.map((n, i) => (
+              <article
+                key={n.id}
+                className="news-card reveal-child"
+                style={{ '--reveal-delay': `${0.08 + i * 0.07}s` }}
+              >
+                {n.coverImageUrl ? (
+                  <div className="news-media">
+                    <img src={n.coverImageUrl} alt="" />
+                  </div>
+                ) : null}
                 <div className="news-copy">
                   <div className="date">{n.publishAtUtc ? new Date(n.publishAtUtc).toLocaleDateString('ru-RU') : ''}</div>
                   <h3>{n.title}</h3>

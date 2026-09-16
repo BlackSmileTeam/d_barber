@@ -72,13 +72,19 @@ export default function ContactsPage() {
   return (
     <section className="section section-contacts reveal" id="contacts">
       <div className="container">
-        <h2>Контакты</h2>
-        <p className="lead section-kicker">Как нас найти в Петербурге.</p>
+        <div className="section-head">
+          <span className="section-index" aria-hidden="true">05</span>
+          <div>
+            <h2>Контакты</h2>
+            <p className="lead section-kicker">Как нас найти в Петербурге.</p>
+          </div>
+        </div>
+        <div className="section-rule" aria-hidden="true" />
         {empty ? (
           <p className="empty-block">Данные отсутствуют</p>
         ) : (
           <div className="contacts-grid">
-            <div>
+            <div className="contacts-info reveal-child" style={{ '--reveal-delay': '0.1s' }}>
               <p className="contact-line contact-name">
                 <IconComb className="contact-icon" />
                 <span>{salon?.salonName || 'Данные отсутствуют'}</span>
@@ -115,11 +121,12 @@ export default function ContactsPage() {
                 </div>
               )}
               <div className="contact-actions">
-                <button type="button" className="btn btn-primary" onClick={openMap} disabled={!salon?.address}>Открыть в Яндекс.Картах</button>
+                <button type="button" className="btn btn-primary btn-cta" onClick={openMap} disabled={!salon?.address}>Открыть в Яндекс.Картах</button>
                 <button type="button" className="btn btn-ghost" onClick={route} disabled={!salon?.address}>Построить маршрут</button>
               </div>
             </div>
-            <div className="map-frame">
+            <div className="map-frame reveal-child" style={{ '--reveal-delay': '0.2s' }}>
+              <span className="map-accent" aria-hidden="true" />
               {mapSrc && <iframe title="Яндекс карта" src={mapSrc} loading="lazy" />}
             </div>
           </div>
