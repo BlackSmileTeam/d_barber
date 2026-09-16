@@ -70,9 +70,10 @@ export default function ContactsPage() {
   const empty = failed || (loaded && !salon);
 
   return (
-    <section className="section section-contacts" id="contacts">
+    <section className="section section-contacts reveal" id="contacts">
       <div className="container">
         <h2>Контакты</h2>
+        <p className="lead section-kicker">Как нас найти в Петербурге.</p>
         {empty ? (
           <p className="empty-block">Данные отсутствуют</p>
         ) : (

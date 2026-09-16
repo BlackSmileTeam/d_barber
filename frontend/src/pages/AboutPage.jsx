@@ -26,9 +26,10 @@ export default function AboutPage() {
   const missing = failed || (loaded && (!salon || (!paragraphs.length && !photo)));
 
   return (
-    <section className="section section-about" id="about">
+    <section className="section section-about reveal" id="about">
       <div className="container">
         <h2>Обо мне</h2>
+        <p className="lead section-kicker">Мастер, место и подход.</p>
         {missing ? (
           <p className="empty-block">Данные отсутствуют</p>
         ) : (

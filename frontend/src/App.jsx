@@ -26,7 +26,7 @@ export default function App() {
               <Route path="*" element={<LandingPage />} />
             </Routes>
             <footer className="site-footer">
-              <div className="container">Санкт-Петербург</div>
+              <div className="container">D_Barber · Санкт-Петербург</div>
             </footer>
           </div>
         </BrowserRouter>

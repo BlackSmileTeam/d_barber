@@ -143,9 +143,10 @@ export default function BookPage() {
   };
 
   return (
-    <section className="section section-book" id="book">
+    <section className="section section-book reveal" id="book">
       <div className="container">
         <h2>Онлайн-запись</h2>
+        <p className="lead section-kicker">Выбери услугу и удобное время.</p>
 
         {(loadFailed || (loaded && services.length === 0)) ? (
           <p className="empty-block">Данные отсутствуют</p>

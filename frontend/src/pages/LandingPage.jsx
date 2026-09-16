@@ -30,7 +30,7 @@ export default function LandingPage() {
   }, [location.pathname, location.hash]);
 
   return (
-    <main>
+    <main className="landing">
       <HomePage />
       <NewsPage />
       <AboutPage />

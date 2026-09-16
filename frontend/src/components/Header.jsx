@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 
@@ -14,25 +15,41 @@ export default function Header() {
   const { auth, logout } = useAuth();
   const location = useLocation();
   const onLanding = location.pathname === '/';
+  const [open, setOpen] = useState(false);
+
+  const close = () => setOpen(false);
 
   return (
-    <header className="site-header">
+    <header className={`site-header${open ? ' is-open' : ''}`}>
       <div className="container inner">
-        <Link to="/#top" className="brand">D_Barber</Link>
-        <nav className="nav">
+        <Link to="/#top" className="brand" onClick={close}>D_Barber</Link>
+
+        <button
+          type="button"
+          className="nav-toggle"
+          aria-expanded={open}
+          aria-controls="site-nav"
+          aria-label={open ? 'Закрыть меню' : 'Открыть меню'}
+          onClick={() => setOpen((v) => !v)}
+        >
+          <span />
+          <span />
+        </button>
+
+        <nav className="nav" id="site-nav">
           {sections.map((s) => (
             onLanding ? (
-              <a key={s.href} href={s.href.replace('/', '')}>{s.label}</a>
+              <a key={s.href} href={s.href.replace('/', '')} onClick={close}>{s.label}</a>
             ) : (
-              <Link key={s.href} to={s.href}>{s.label}</Link>
+              <Link key={s.href} to={s.href} onClick={close}>{s.label}</Link>
             )
           ))}
-          {auth?.role === 'Client' && <Link to="/cabinet">Кабинет</Link>}
-          {auth?.role === 'Admin' && <Link to="/admin">Админка</Link>}
+          {auth?.role === 'Client' && <Link to="/cabinet" onClick={close}>Кабинет</Link>}
+          {auth?.role === 'Admin' && <Link to="/admin" onClick={close}>Админка</Link>}
           {auth ? (
-            <button type="button" className="btn btn-ghost" onClick={logout}>Выйти</button>
+            <button type="button" className="btn btn-ghost" onClick={() => { logout(); close(); }}>Выйти</button>
           ) : (
-            <Link to="/login">Войти</Link>
+            <Link to="/login" className="nav-login" onClick={close}>Войти</Link>
           )}
         </nav>
       </div>

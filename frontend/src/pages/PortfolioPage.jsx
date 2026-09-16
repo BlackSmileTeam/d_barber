@@ -31,10 +31,13 @@ export default function PortfolioPage() {
   const empty = failed || (loaded && items.length === 0);
 
   return (
-    <section className="section section-portfolio" id="portfolio">
+    <section className="section section-portfolio reveal" id="portfolio">
       <div className="container">
         <div className="portfolio-head">
-          <h2>Портфолио</h2>
+          <div>
+            <h2>Портфолио</h2>
+            <p className="lead section-kicker">Работы, которые говорят сами за себя.</p>
+          </div>
           {!empty && (
             <div className="carousel-nav">
               <button type="button" className="btn btn-ghost carousel-btn" onClick={() => scrollBy(-1)} aria-label="Назад">‹</button>
