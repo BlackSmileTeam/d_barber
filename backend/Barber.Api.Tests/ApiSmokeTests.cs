@@ -151,6 +151,37 @@ public class ApiSmokeTests : IClassFixture<BarberApiFactory>
         Assert.Equal(HttpStatusCode.NoContent, delSvc.StatusCode);
     }
 
+    [Fact]
+    public async Task Telegram_Link_ByPhone_RequiresBotToken()
+    {
+        var phone = $"+7999{Random.Shared.Next(1000000, 9999999)}";
+        var register = await _client.PostAsJsonAsync("/api/auth/register", new
+        {
+            phone,
+            password = "secret12",
+            name = "TG Клиент"
+        });
+        register.EnsureSuccessStatusCode();
+
+        var unauthorized = await _client.PostAsJsonAsync("/api/telegram/link", new { phone, chatId = 424242L });
+        Assert.Equal(HttpStatusCode.Unauthorized, unauthorized.StatusCode);
+
+        using var req = new HttpRequestMessage(HttpMethod.Post, "/api/telegram/link");
+        req.Headers.TryAddWithoutValidation("X-Telegram-Bot-Token", BarberApiFactory.TestBotToken);
+        req.Content = JsonContent.Create(new { phone, chatId = 424242L });
+        var linked = await _client.SendAsync(req);
+        Assert.Equal(HttpStatusCode.OK, linked.StatusCode);
+
+        var meLogin = await _client.PostAsJsonAsync("/api/auth/login", new { phone, password = "secret12" });
+        meLogin.EnsureSuccessStatusCode();
+        var auth = await meLogin.Content.ReadFromJsonAsync<AuthDto>(JsonOpts);
+        Assert.NotNull(auth?.Token);
+        _client.DefaultRequestHeaders.Authorization =
+            new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", auth.Token);
+        var me = await _client.GetFromJsonAsync<JsonElement>("/api/auth/me", JsonOpts);
+        Assert.True(me.GetProperty("telegramLinked").GetBoolean());
+    }
+
     private sealed record AuthDto(string Token, string Role, string Name, string? Phone, Guid UserId);
     private sealed record ServiceDto(Guid Id, string Name, decimal Price, int DurationMinutes);
     private sealed record SlotsDto(Guid ServiceId, string Date, List<DateTime> SlotsUtc);

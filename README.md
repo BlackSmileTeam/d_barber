@@ -15,11 +15,21 @@ dotnet run --project Barber.Api --launch-profile http
 cd frontend
 npm install
 npm run dev
+
+# Telegram bot (нужен TELEGRAM_BOT_TOKEN)
+cd Barber.TelegramBot
+set TELEGRAM_BOT_TOKEN=...
+set API_BASE_URL=http://localhost:5271/api
+dotnet run
 ```
 
 - Сайт: http://localhost:5173  
 - API / Swagger: http://localhost:5271/swagger  
 - Админ по умолчанию: `admin` / `admin123` (смените в проде)
+
+## Telegram
+
+Пошаговая публикация бота (BotFather, secrets, проверка): [TELEGRAM.md](TELEGRAM.md).
 
 ## MySQL
 
@@ -32,4 +42,4 @@ npm run dev
 ## CI/CD
 
 - `.github/workflows/ci.yml` — build + обязательные API-тесты  
-- `.github/workflows/deploy.yml` — после успешного CI деплой API/frontend на Selectel (порты **55332** API / **55333** frontend)
+- `.github/workflows/deploy.yml` — после успешного CI деплой API / frontend / **telegram-bot** на Selectel (порты **55332** API / **55333** frontend)

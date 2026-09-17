@@ -15,6 +15,7 @@ concurrency:
 env:
   BACKEND_IMAGE: dbarber-backend
   FRONTEND_IMAGE: dbarber-frontend
+  TELEGRAM_BOT_IMAGE: dbarber-telegram-bot
   BACKEND_HOST_PORT: 55332
   FRONTEND_HOST_PORT: 55333
   BACKEND_CONTAINER_PORT: 44315
@@ -100,11 +101,22 @@ jobs:
           build-args: |
             VITE_API_URL=
 
+      - name: Build telegram bot image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./Barber.TelegramBot
+          file: ./Barber.TelegramBot/Dockerfile
+          push: false
+          load: true
+          tags: ${{ env.TELEGRAM_BOT_IMAGE }}:latest
+          platforms: linux/amd64
+
       - name: Save images to workspace
         run: |
           mkdir -p artifacts
           docker save ${{ env.BACKEND_IMAGE }}:latest | gzip > artifacts/${{ env.BACKEND_IMAGE }}.tar.gz
           docker save ${{ env.FRONTEND_IMAGE }}:latest | gzip > artifacts/${{ env.FRONTEND_IMAGE }}.tar.gz
+          docker save ${{ env.TELEGRAM_BOT_IMAGE }}:latest | gzip > artifacts/${{ env.TELEGRAM_BOT_IMAGE }}.tar.gz
           ls -lh artifacts/
 
       - name: Upload images to server
@@ -114,7 +126,7 @@ jobs:
           username: ${{ secrets.PROD_USER }}
           key: ${{ secrets.PROD_SSH_PRIVATE_KEY }}
           port: ${{ secrets.PROD_SSH_PORT }}
-          source: "artifacts/${{ env.BACKEND_IMAGE }}.tar.gz,artifacts/${{ env.FRONTEND_IMAGE }}.tar.gz"
+          source: "artifacts/${{ env.BACKEND_IMAGE }}.tar.gz,artifacts/${{ env.FRONTEND_IMAGE }}.tar.gz,artifacts/${{ env.TELEGRAM_BOT_IMAGE }}.tar.gz"
           target: "/tmp/dbarber-images"
           strip_components: 1
           overwrite: true
@@ -138,6 +150,7 @@ jobs:
             DEPLOY_ROOT="${{ env.DEPLOY_ROOT }}"
             BACKEND_IMAGE="${{ env.BACKEND_IMAGE }}"
             FRONTEND_IMAGE="${{ env.FRONTEND_IMAGE }}"
+            TELEGRAM_BOT_IMAGE="${{ env.TELEGRAM_BOT_IMAGE }}"
             BACKEND_HOST_PORT="${{ env.BACKEND_HOST_PORT }}"
             FRONTEND_HOST_PORT="${{ env.FRONTEND_HOST_PORT }}"
             BACKEND_CONTAINER_PORT="${{ env.BACKEND_CONTAINER_PORT }}"
@@ -150,9 +163,11 @@ jobs:
 
             test -f "/tmp/dbarber-images/${BACKEND_IMAGE}.tar.gz"
             test -f "/tmp/dbarber-images/${FRONTEND_IMAGE}.tar.gz"
+            test -f "/tmp/dbarber-images/${TELEGRAM_BOT_IMAGE}.tar.gz"
             docker load < "/tmp/dbarber-images/${BACKEND_IMAGE}.tar.gz"
             docker load < "/tmp/dbarber-images/${FRONTEND_IMAGE}.tar.gz"
-            rm -f "/tmp/dbarber-images/${BACKEND_IMAGE}.tar.gz" "/tmp/dbarber-images/${FRONTEND_IMAGE}.tar.gz"
+            docker load < "/tmp/dbarber-images/${TELEGRAM_BOT_IMAGE}.tar.gz"
+            rm -f "/tmp/dbarber-images/${BACKEND_IMAGE}.tar.gz" "/tmp/dbarber-images/${FRONTEND_IMAGE}.tar.gz" "/tmp/dbarber-images/${TELEGRAM_BOT_IMAGE}.tar.gz"
 
             # Same Docker network as bebochka so UFW already allows MySQL (172.18.0.0/16).
             # Do NOT stop/recreate bebochka containers — only attach dbarber_* to the network.
@@ -196,6 +211,19 @@ jobs:
               -p "${FRONTEND_HOST_PORT}:80" \
               "$FRONTEND_IMAGE:latest"
 
+            # Telegram bot: long-polling process (no published ports). Needs token to stay active.
+            docker stop "$TELEGRAM_BOT_IMAGE" 2>/dev/null || true
+            docker rm -f "$TELEGRAM_BOT_IMAGE" 2>/dev/null || true
+            docker run -d \
+              --name "$TELEGRAM_BOT_IMAGE" \
+              --restart unless-stopped \
+              --network "$EDGE_NET" \
+              -e TelegramBot__Token="${TELEGRAM_BOT_TOKEN:-}" \
+              -e TELEGRAM_BOT_TOKEN="${TELEGRAM_BOT_TOKEN:-}" \
+              -e Api__BaseUrl="http://${BACKEND_IMAGE}:${BACKEND_CONTAINER_PORT}/api" \
+              -e API_BASE_URL="http://${BACKEND_IMAGE}:${BACKEND_CONTAINER_PORT}/api" \
+              "$TELEGRAM_BOT_IMAGE:latest"
+
             echo "Waiting for API health..."
             CODE=000
             for i in $(seq 1 30); do
@@ -214,6 +242,8 @@ jobs:
               docker logs --tail 120 "$BACKEND_IMAGE" || true
               exit 1
             fi
+            echo "Telegram bot logs (tail):"
+            docker logs --tail 40 "$TELEGRAM_BOT_IMAGE" || true
             echo "bebochka containers left running (not stopped by this deploy)"
       - name: Summary
         run: |
@@ -221,5 +251,6 @@ jobs:
             echo "## D_Barber deploy"
             echo "- API: \`http://${{ secrets.PROD_HOST }}:${{ env.BACKEND_HOST_PORT }}\`"
             echo "- Frontend: \`http://${{ secrets.PROD_HOST }}:${{ env.FRONTEND_HOST_PORT }}\`"
+            echo "- Telegram bot container: \`${{ env.TELEGRAM_BOT_IMAGE }}\` (needs TELEGRAM_BOT_TOKEN secret)"
             echo "- FRONTEND_PUBLIC_URL secret must match frontend URL"
           } >> "$GITHUB_STEP_SUMMARY"

@@ -33,3 +33,17 @@ services:
       - backend
     ports:
       - "${FRONTEND_PORT:-55333}:80"
+
+  telegram-bot:
+    build:
+      context: ./Barber.TelegramBot
+      dockerfile: Dockerfile
+    container_name: dbarber-telegram-bot
+    restart: unless-stopped
+    depends_on:
+      - backend
+    environment:
+      TelegramBot__Token: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      Api__BaseUrl: http://dbarber-backend:44315/api
+      API_BASE_URL: http://dbarber-backend:44315/api

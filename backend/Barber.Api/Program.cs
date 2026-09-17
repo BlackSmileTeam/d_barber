@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using System.Text;
+using Barber.Api.Workers;
 using Barber.Infrastructure;
 using Barber.Infrastructure.Data;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -10,6 +11,7 @@ builder.Configuration.AddUserSecrets(typeof(Program).Assembly, optional: true);
 builder.Configuration.AddEnvironmentVariables();
 
 builder.Services.AddInfrastructure(builder.Configuration);
+builder.Services.AddHostedService<ReminderHostedService>();
 builder.Services.AddControllers()
     .AddJsonOptions(o =>
     {
