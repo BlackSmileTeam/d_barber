@@ -17,6 +17,8 @@ services:
       Jwt__Audience: ${JWT_AUDIENCE:-DBarberClient}
       Telegram__BotToken: ${TELEGRAM_BOT_TOKEN:-}
       Telegram__AdminChatId: ${TELEGRAM_ADMIN_CHAT_ID:-}
+      Telegram__ProxyUrl: ${TELEGRAM_PROXY_URL:-}
+      TELEGRAM_PROXY_URL: ${TELEGRAM_PROXY_URL:-}
       App__FrontendPublicUrl: ${FRONTEND_PUBLIC_URL:-}
     ports:
       - "${BACKEND_PORT:-55332}:44315"
@@ -45,5 +47,7 @@ services:
     environment:
       TelegramBot__Token: ${TELEGRAM_BOT_TOKEN:-}
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TelegramBot__ProxyUrl: ${TELEGRAM_PROXY_URL:-}
+      TELEGRAM_PROXY_URL: ${TELEGRAM_PROXY_URL:-}
       Api__BaseUrl: http://dbarber-backend:44315/api
       API_BASE_URL: http://dbarber-backend:44315/api

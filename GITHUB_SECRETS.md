@@ -61,18 +61,20 @@ SHOW GRANTS FOR 'dbarber_app'@'%';
 |------|----------------|
 | `TELEGRAM_BOT_TOKEN` | [@BotFather](https://t.me/BotFather) → `/newbot` → скопировать токен |
 | `TELEGRAM_ADMIN_CHAT_ID` | Написать боту `/chatid` → скопировать число |
+| `TELEGRAM_PROXY_URL` | **Опционально**, но на Selectel/РФ часто **обязательно**: HTTP-прокси до `api.telegram.org`, например `http://user:pass@host:port` |
 
 Куда вставить:
 
 1. Открыть https://github.com/BlackSmileTeam/d_barber/settings/secrets/actions  
 2. **New repository secret** → имя `TELEGRAM_BOT_TOKEN` → Value = токен → **Add secret**  
 3. **New repository secret** → имя `TELEGRAM_ADMIN_CHAT_ID` → Value = chat id → **Add secret**  
-4. **Actions** → **Deploy production** → **Run workflow**
+4. Если `curl https://api.telegram.org` с сервера **висит/таймаут** — добавьте `TELEGRAM_PROXY_URL`  
+5. **Actions** → **Deploy production** → **Run workflow**
 
 Что делают секреты при деплое:
 
-- API: `Telegram__BotToken`, `Telegram__AdminChatId` — исходящие сообщения (запись, напоминания, админ).
-- Контейнер `dbarber-telegram-bot`: тот же токен + `Api__BaseUrl=http://dbarber-backend:44315/api` — приём `/start`, привязка телефона.
+- API: `Telegram__BotToken`, `Telegram__AdminChatId`, `Telegram__ProxyUrl` — исходящие сообщения (запись, напоминания, админ).
+- Контейнер `dbarber-telegram-bot`: тот же токен + прокси + `Api__BaseUrl=http://dbarber-backend:44315/api` — приём `/start`, привязка телефона.
 
 ## Опциональные (repository)
 

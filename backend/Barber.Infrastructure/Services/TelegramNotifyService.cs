@@ -19,17 +19,28 @@ public class TelegramNotifyService(IHttpClientFactory httpClientFactory, IConfig
             return;
         }
 
-        var client = httpClientFactory.CreateClient();
+        var client = httpClientFactory.CreateClient("telegram");
         var url = $"https://api.telegram.org/bot{token}/sendMessage";
         var payload = new { chat_id = chatId, text, parse_mode = "HTML", disable_web_page_preview = true };
-        var response = await client.PostAsJsonAsync(url, payload, ct);
-        if (!response.IsSuccessStatusCode)
+        try
         {
-            var body = await response.Content.ReadAsStringAsync(ct);
-            logger.LogWarning("Telegram send failed: {Status} {Body}", response.StatusCode, body);
+            var response = await client.PostAsJsonAsync(url, payload, ct);
+            if (!response.IsSuccessStatusCode)
+            {
+                var body = await response.Content.ReadAsStringAsync(ct);
+                logger.LogWarning("Telegram send failed: {Status} {Body}", response.StatusCode, body);
+            }
+            else
+                logger.LogInformation("Telegram sent to {ChatId}", chatId);
         }
-        else
-            logger.LogInformation("Telegram sent to {ChatId}", chatId);
+        catch (Exception ex)
+        {
+            logger.LogWarning(
+                ex,
+                "Telegram send timed out/unreachable to chat {ChatId}. "
+                + "If api.telegram.org is blocked on the host, set TELEGRAM_PROXY_URL and redeploy.",
+                chatId);
+        }
     }
 
     public async Task NotifyAdminAsync(BarberDbContext db, string text, CancellationToken ct = default)

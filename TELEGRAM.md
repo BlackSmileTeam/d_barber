@@ -205,7 +205,28 @@ dotnet run
 | Симптом | Что сделать |
 |---------|-------------|
 | Бот молчит | `docker logs dbarber-telegram-bot` — есть ли token / `Bot authorized` |
+| `Request timed out` на `GetMeAsync` | С сервера **заблокирован** `api.telegram.org` (часто на Selectel/РФ). См. ниже |
 | Админ не получает сообщения | Проверить `TELEGRAM_ADMIN_CHAT_ID`, что админ писал боту `/start`, что секрет попал в последний deploy |
 | «Клиент не найден» при привязке | Тот же телефон, что при регистрации на сайте |
 | 401 на link | Токен бота в контейнере бота ≠ `Telegram__BotToken` в API |
 | Conflict getUpdates | Не запускайте второй экземпляр бота с тем же токеном локально + на проде |
+
+### Диагностика: таймаут до Telegram API
+
+На сервере:
+
+```bash
+curl -m 15 -I https://api.telegram.org
+docker run --rm --network bebochka-edge curlimages/curl:8.5.0 -m 15 -I https://api.telegram.org
+```
+
+Если обе команды **висят** или `Connection timed out` — токен не виноват: нужен **исходящий HTTP-прокси**.
+
+1. Возьмите HTTP-прокси, с которого открывается Telegram (формат: `http://user:pass@host:port`).
+2. GitHub → Settings → Secrets → **New repository secret**:
+   - Name: `TELEGRAM_PROXY_URL`
+   - Value: URL прокси
+3. Actions → **Deploy production** → **Run workflow** → `main`
+4. В логах ожидайте: `Bot authorized as @...` и `Proxy: (configured)`
+
+Бот после фикса ретраит подключение сам (не гасит процесс на первом таймауте). Без доступа к `api.telegram.org` (напрямую или через прокси) отвечать в Telegram он не сможет.

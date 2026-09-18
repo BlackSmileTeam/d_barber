@@ -1,3 +1,4 @@
+using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -13,6 +14,11 @@ using Telegram.Bot.Types.ReplyMarkups;
 
 var builder = Host.CreateApplicationBuilder(args);
 builder.Configuration.AddEnvironmentVariables();
+builder.Services.Configure<HostOptions>(options =>
+{
+    // Do not tear down the process on a single Telegram API timeout (common on RU hosts).
+    options.BackgroundServiceExceptionBehavior = BackgroundServiceExceptionBehavior.Ignore;
+});
 builder.Services.AddHttpClient("api", (sp, client) =>
 {
     var baseUrl = sp.GetRequiredService<IConfiguration>()["Api:BaseUrl"]
@@ -29,7 +35,6 @@ public sealed class BotWorker(
     IConfiguration config,
     ILogger<BotWorker> logger) : BackgroundService
 {
-
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         var token = ResolveBotToken(config);
@@ -44,27 +49,63 @@ public sealed class BotWorker(
         var apiBase = config["Api:BaseUrl"]
             ?? Environment.GetEnvironmentVariable("API_BASE_URL")
             ?? "http://localhost:5271/api";
-        logger.LogInformation("D_Barber Telegram bot starting. API: {Api}", apiBase);
+        var proxyUrl = ResolveProxyUrl(config);
+        logger.LogInformation(
+            "D_Barber Telegram bot starting. API: {Api}; Proxy: {Proxy}",
+            apiBase,
+            string.IsNullOrWhiteSpace(proxyUrl) ? "(none)" : "(configured)");
 
-        var bot = new TelegramBotClient(token);
-        var me = await bot.GetMeAsync(stoppingToken);
-        logger.LogInformation("Bot authorized as @{Username} (id {Id})", me.Username, me.Id);
-
-        var receiverOptions = new ReceiverOptions
+        var delay = TimeSpan.FromSeconds(5);
+        while (!stoppingToken.IsCancellationRequested)
         {
-            AllowedUpdates = [UpdateType.Message],
-            ThrowPendingUpdates = true
-        };
-
-        await bot.ReceiveAsync(
-            updateHandler: (client, update, ct) => HandleUpdateAsync(client, update, token, ct),
-            pollingErrorHandler: (_, ex, _) =>
+            try
             {
-                logger.LogError(ex, "Telegram polling error");
-                return Task.CompletedTask;
-            },
-            receiverOptions: receiverOptions,
-            cancellationToken: stoppingToken);
+                using var httpClient = CreateTelegramHttpClient(proxyUrl);
+                var bot = new TelegramBotClient(token, httpClient);
+                var me = await bot.GetMeAsync(stoppingToken);
+                logger.LogInformation("Bot authorized as @{Username} (id {Id})", me.Username, me.Id);
+                delay = TimeSpan.FromSeconds(5);
+
+                var receiverOptions = new ReceiverOptions
+                {
+                    AllowedUpdates = [UpdateType.Message],
+                    ThrowPendingUpdates = true
+                };
+
+                await bot.ReceiveAsync(
+                    updateHandler: (client, update, ct) => HandleUpdateAsync(client, update, token, ct),
+                    pollingErrorHandler: (_, ex, _) =>
+                    {
+                        logger.LogError(ex, "Telegram polling error");
+                        return Task.CompletedTask;
+                    },
+                    receiverOptions: receiverOptions,
+                    cancellationToken: stoppingToken);
+            }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            {
+                break;
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(
+                    ex,
+                    "Telegram API unreachable (timeout/blocked?). Retry in {Seconds}s. "
+                    + "Check: curl -m 15 https://api.telegram.org from the server; "
+                    + "if it hangs, set GitHub secret TELEGRAM_PROXY_URL (HTTP proxy) and redeploy.",
+                    delay.TotalSeconds);
+                try
+                {
+                    await Task.Delay(delay, stoppingToken);
+                }
+                catch (OperationCanceledException)
+                {
+                    break;
+                }
+
+                delay = TimeSpan.FromSeconds(Math.Min(delay.TotalSeconds * 2, 120));
+            }
+        }
     }
 
     private async Task HandleUpdateAsync(
@@ -148,7 +189,7 @@ public sealed class BotWorker(
     {
         var keyboard = new ReplyKeyboardMarkup(new[]
         {
-            KeyboardButton.WithRequestContact("📱 Поделиться номером")
+            KeyboardButton.WithRequestContact("Поделиться номером")
         })
         {
             ResizeKeyboard = true,
@@ -231,6 +272,19 @@ public sealed class BotWorker(
             cancellationToken: ct);
     }
 
+    private static HttpClient CreateTelegramHttpClient(string? proxyUrl)
+    {
+        if (string.IsNullOrWhiteSpace(proxyUrl))
+            return new HttpClient { Timeout = TimeSpan.FromSeconds(100) };
+
+        var handler = new HttpClientHandler
+        {
+            Proxy = new WebProxy(proxyUrl),
+            UseProxy = true
+        };
+        return new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(100) };
+    }
+
     private static string? TryReadMessage(string body)
     {
         try
@@ -254,6 +308,17 @@ public sealed class BotWorker(
             config["TELEGRAM_BOT_TOKEN"],
             Environment.GetEnvironmentVariable("TELEGRAM_BOT_TOKEN"),
             Environment.GetEnvironmentVariable("Telegram__BotToken"));
+
+    private static string? ResolveProxyUrl(IConfiguration config) =>
+        FirstNonEmpty(
+            config["TelegramBot:ProxyUrl"],
+            config["Telegram:ProxyUrl"],
+            config["TELEGRAM_PROXY_URL"],
+            Environment.GetEnvironmentVariable("TELEGRAM_PROXY_URL"),
+            Environment.GetEnvironmentVariable("TelegramBot__ProxyUrl"),
+            Environment.GetEnvironmentVariable("Telegram__ProxyUrl"),
+            Environment.GetEnvironmentVariable("HTTPS_PROXY"),
+            Environment.GetEnvironmentVariable("HTTP_PROXY"));
 
     private static string? FirstNonEmpty(params string?[] values) =>
         values.FirstOrDefault(v => !string.IsNullOrWhiteSpace(v));
