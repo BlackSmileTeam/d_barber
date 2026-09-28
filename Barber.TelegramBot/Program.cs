@@ -608,7 +608,7 @@ public sealed class BotWorker(
         {
             sessions.Get(chatId).Mode = BotMode.NeedPhone;
             await bot.SendTextMessageAsync(chatId,
-                "📱 Чтобы записываться, поделитесь номером телефона кнопкой ниже.",
+                "📱 Учётная запись не найдена. Для регистрации необходимо поделиться номером телефона.",
                 replyMarkup: SharePhoneKeyboard(),
                 cancellationToken: ct);
             return false;
@@ -623,7 +623,7 @@ public sealed class BotWorker(
         await bot.SendTextMessageAsync(chatId,
             "👋 <b>Добро пожаловать в D_Barber!</b>\n\n"
             + "Здесь можно записаться на стрижку, посмотреть свои визиты, отменить или перенести запись.\n\n"
-            + "📱 Сначала поделитесь номером — аккаунт создастся сам, пароль в боте не нужен.",
+            + "📱 Учётная запись не найдена. Для регистрации необходимо поделиться номером телефона.",
             parseMode: ParseMode.Html,
             replyMarkup: SharePhoneKeyboard(),
             cancellationToken: ct);
