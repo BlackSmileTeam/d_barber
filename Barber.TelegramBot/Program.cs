@@ -14,6 +14,7 @@ using Telegram.Bot.Types.ReplyMarkups;
 
 var builder = Host.CreateApplicationBuilder(args);
 builder.Configuration.AddEnvironmentVariables();
+builder.Configuration.AddUserSecrets(typeof(BotWorker).Assembly, optional: true);
 builder.Services.Configure<HostOptions>(options =>
 {
     // Do not tear down the process on a single Telegram API timeout (common on RU hosts).
@@ -40,11 +41,20 @@ public sealed class BotWorker(
         var token = ResolveBotToken(config);
         if (string.IsNullOrWhiteSpace(token))
         {
-            logger.LogWarning("Telegram bot token is not configured (TelegramBot:Token / TELEGRAM_BOT_TOKEN). Worker idle.");
+            logger.LogWarning(
+                "[{At}] Telegram bot token is not configured — Worker idle, /start will NOT be handled. "
+                + "Set env TELEGRAM_BOT_TOKEN, or TelegramBot:Token in appsettings.json, or: "
+                + "dotnet user-secrets set \"TelegramBot:Token\" \"YOUR_TOKEN\" --project Barber.TelegramBot",
+                DateTimeOffset.Now.ToString("yyyy-MM-dd HH:mm:ss zzz"));
             while (!stoppingToken.IsCancellationRequested)
                 await Task.Delay(TimeSpan.FromHours(1), stoppingToken);
             return;
         }
+
+        logger.LogInformation(
+            "[{At}] Token loaded (length {Len}). Waiting for Telegram updates…",
+            DateTimeOffset.Now.ToString("yyyy-MM-dd HH:mm:ss zzz"),
+            token.Length);
 
         var apiBase = config["Api:BaseUrl"]
             ?? Environment.GetEnvironmentVariable("API_BASE_URL")
@@ -114,14 +124,30 @@ public sealed class BotWorker(
         string botToken,
         CancellationToken ct)
     {
+        LogIncomingUpdate(update);
+
         if (update.Message is not { } message)
+        {
+            logger.LogInformation(
+                "[{At}] Update #{UpdateId} ignored (type={Type}, no message).",
+                DateTimeOffset.Now.ToString("yyyy-MM-dd HH:mm:ss zzz"),
+                update.Id,
+                update.Type);
             return;
+        }
 
         var chatId = message.Chat.Id;
+        var userId = message.From?.Id;
         try
         {
             if (message.Contact is { } contact)
             {
+                logger.LogInformation(
+                    "[{At}] Action=link_contact UserId={UserId} ChatId={ChatId} Phone={Phone}",
+                    DateTimeOffset.Now.ToString("yyyy-MM-dd HH:mm:ss zzz"),
+                    userId,
+                    chatId,
+                    contact.PhoneNumber);
                 await LinkByPhoneAsync(bot, chatId, contact.PhoneNumber, botToken, ct);
                 return;
             }
@@ -129,6 +155,12 @@ public sealed class BotWorker(
             var text = message.Text?.Trim() ?? string.Empty;
             if (text.StartsWith("/start", StringComparison.OrdinalIgnoreCase))
             {
+                logger.LogInformation(
+                    "[{At}] Action=command_start UserId={UserId} ChatId={ChatId} Payload={Text}",
+                    DateTimeOffset.Now.ToString("yyyy-MM-dd HH:mm:ss zzz"),
+                    userId,
+                    chatId,
+                    text);
                 await SendWelcomeAsync(bot, chatId, ct);
                 return;
             }
@@ -136,6 +168,11 @@ public sealed class BotWorker(
             if (text.StartsWith("/chatid", StringComparison.OrdinalIgnoreCase)
                 || text.StartsWith("/id", StringComparison.OrdinalIgnoreCase))
             {
+                logger.LogInformation(
+                    "[{At}] Action=command_chatid UserId={UserId} ChatId={ChatId}",
+                    DateTimeOffset.Now.ToString("yyyy-MM-dd HH:mm:ss zzz"),
+                    userId,
+                    chatId);
                 await bot.SendTextMessageAsync(
                     chatId,
                     $"Ваш chat id: <code>{chatId}</code>\n\nСкопируйте это значение в GitHub Secret <code>TELEGRAM_ADMIN_CHAT_ID</code> (для админ-уведомлений).",
@@ -146,6 +183,11 @@ public sealed class BotWorker(
 
             if (text.StartsWith("/help", StringComparison.OrdinalIgnoreCase))
             {
+                logger.LogInformation(
+                    "[{At}] Action=command_help UserId={UserId} ChatId={ChatId}",
+                    DateTimeOffset.Now.ToString("yyyy-MM-dd HH:mm:ss zzz"),
+                    userId,
+                    chatId);
                 await bot.SendTextMessageAsync(
                     chatId,
                     "Команды:\n/start — привязать телефон\n/chatid — показать chat id\n/help — справка\n\nИли отправьте номер телефона текстом (+7…).",
@@ -156,12 +198,24 @@ public sealed class BotWorker(
             var phone = ExtractPhone(text);
             if (phone is not null)
             {
+                logger.LogInformation(
+                    "[{At}] Action=link_phone_text UserId={UserId} ChatId={ChatId} Phone={Phone}",
+                    DateTimeOffset.Now.ToString("yyyy-MM-dd HH:mm:ss zzz"),
+                    userId,
+                    chatId,
+                    phone);
                 await LinkByPhoneAsync(bot, chatId, phone, botToken, ct);
                 return;
             }
 
             if (!string.IsNullOrWhiteSpace(text))
             {
+                logger.LogInformation(
+                    "[{At}] Action=unknown_text UserId={UserId} ChatId={ChatId} Text={Text}",
+                    DateTimeOffset.Now.ToString("yyyy-MM-dd HH:mm:ss zzz"),
+                    userId,
+                    chatId,
+                    text);
                 await bot.SendTextMessageAsync(
                     chatId,
                     "Не понял сообщение. Нажмите /start и поделитесь контактом, или отправьте номер телефона.",
@@ -170,7 +224,12 @@ public sealed class BotWorker(
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Failed to handle update from chat {ChatId}", chatId);
+            logger.LogError(
+                ex,
+                "[{At}] Failed to handle update from UserId={UserId} ChatId={ChatId}",
+                DateTimeOffset.Now.ToString("yyyy-MM-dd HH:mm:ss zzz"),
+                userId,
+                chatId);
             try
             {
                 await bot.SendTextMessageAsync(
@@ -183,6 +242,46 @@ public sealed class BotWorker(
                 // ignore secondary send failure
             }
         }
+    }
+
+    private void LogIncomingUpdate(Update update)
+    {
+        var at = DateTimeOffset.Now.ToString("yyyy-MM-dd HH:mm:ss zzz");
+        if (update.Message is { } msg)
+        {
+            var from = msg.From;
+            var command = msg.Text is { Length: > 0 } t && t.StartsWith('/')
+                ? t.Split(' ', 2, StringSplitOptions.RemoveEmptyEntries)[0]
+                : null;
+            logger.LogInformation(
+                "[{At}] Incoming UpdateId={UpdateId} MessageId={MessageId} "
+                + "UserId={UserId} Username={Username} FirstName={FirstName} LastName={LastName} Language={Lang} "
+                + "ChatId={ChatId} ChatType={ChatType} "
+                + "Command={Command} Text={Text} HasContact={HasContact} ContactPhone={ContactPhone} "
+                + "DateUtc={MsgDateUtc}",
+                at,
+                update.Id,
+                msg.MessageId,
+                from?.Id,
+                from?.Username ?? "",
+                from?.FirstName ?? "",
+                from?.LastName ?? "",
+                from?.LanguageCode ?? "",
+                msg.Chat.Id,
+                msg.Chat.Type,
+                command ?? "(none)",
+                msg.Text ?? "(empty)",
+                msg.Contact is not null,
+                msg.Contact?.PhoneNumber ?? "",
+                msg.Date.ToUniversalTime().ToString("yyyy-MM-dd HH:mm:ss'Z'"));
+            return;
+        }
+
+        logger.LogInformation(
+            "[{At}] Incoming UpdateId={UpdateId} Type={Type} (no Message payload)",
+            at,
+            update.Id,
+            update.Type);
     }
 
     private static async Task SendWelcomeAsync(ITelegramBotClient bot, long chatId, CancellationToken ct)
