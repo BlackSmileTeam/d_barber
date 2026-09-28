@@ -598,12 +598,13 @@ public sealed class BotWorker(
         }
 
         var created = data?.TryGetProperty("created", out var c) == true && c.GetBoolean();
-        await bot.SendTextMessageAsync(chatId,
-            created
-                ? "✅ Аккаунт создан по вашему номеру. Можно записываться прямо здесь — пароль не нужен."
-                : "✅ Номер привязан. Можно записываться на услуги.",
-            replyMarkup: MainMenu(),
-            cancellationToken: ct);
+        var passwordIssued = data?.TryGetProperty("passwordIssued", out var p) == true && p.GetBoolean();
+        var text = passwordIssued
+            ? "✅ Номер привязан. Пароль для сайта отправлен в этот чат."
+            : created
+                ? "✅ Аккаунт создан по вашему номеру. Можно записываться прямо здесь."
+                : "✅ Номер привязан. Можно записываться на услуги.";
+        await bot.SendTextMessageAsync(chatId, text, replyMarkup: MainMenu(), cancellationToken: ct);
     }
 
     private async Task<bool> EnsureLinkedAsync(ITelegramBotClient bot, long chatId, string apiKey, CancellationToken ct)

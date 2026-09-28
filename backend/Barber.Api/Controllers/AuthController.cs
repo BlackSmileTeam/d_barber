@@ -48,6 +48,63 @@ public class AuthController(BarberDbContext db, JwtTokenService jwt, TelegramNot
         return Ok(new AuthResponseDto(token, "Client", client.Name, client.Phone, client.Id));
     }
 
+    /// <summary>
+    /// Issues a site password via Telegram. New accounts get a thank-you + password; existing get password only.
+    /// If Telegram is not linked yet, creates/updates the client and returns needTelegram.
+    /// </summary>
+    [HttpPost("telegram-pass")]
+    public async Task<IActionResult> TelegramPass(TelegramPassDto dto, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(dto.Phone))
+            return BadRequest(new { message = "Укажите телефон" });
+
+        var phone = NormalizePhone(dto.Phone);
+        var client = await db.Clients.FirstOrDefaultAsync(c => c.Phone == phone, ct);
+        var isNew = client is null;
+
+        if (client is null)
+        {
+            if (string.IsNullOrWhiteSpace(dto.Name))
+                return BadRequest(new { message = "Укажите имя" });
+
+            client = new Client
+            {
+                Id = Guid.NewGuid(),
+                Phone = phone,
+                Name = dto.Name.Trim(),
+                PasswordHash = BCrypt.Net.BCrypt.HashPassword(Convert.ToBase64String(RandomNumberGenerator.GetBytes(32))),
+                HasUserPassword = false,
+                CreatedViaTelegram = false
+            };
+            db.Clients.Add(client);
+        }
+        else if (!string.IsNullOrWhiteSpace(dto.Name)
+                 && (string.IsNullOrWhiteSpace(client.Name) || client.Name == "Клиент Telegram"))
+        {
+            client.Name = dto.Name.Trim();
+        }
+
+        if (client.TelegramChatId is not long chatId)
+        {
+            await db.SaveChangesAsync(ct);
+            return Ok(new { sent = false, needTelegram = true });
+        }
+
+        var password = GenerateTempPassword();
+        client.PasswordHash = BCrypt.Net.BCrypt.HashPassword(password);
+        client.HasUserPassword = true;
+        await db.SaveChangesAsync(ct);
+
+        // New accounts complete via ensure-client (thanks + password). Linked users get password only.
+        var text = isNew
+            ? "🙏 Спасибо за регистрацию в D_Barber!\n\n"
+              + $"Пароль для входа на сайт: <code>{password}</code>"
+            : $"🔑 Пароль для входа: <code>{password}</code>";
+
+        await telegram.NotifyChatAsync(chatId, text, ct);
+        return Ok(new { sent = true, needTelegram = false });
+    }
+
     [HttpPost("login")]
     public async Task<ActionResult<AuthResponseDto>> Login(ClientLoginDto dto, CancellationToken ct)
     {
@@ -135,7 +192,7 @@ public class AuthController(BarberDbContext db, JwtTokenService jwt, TelegramNot
         return "+" + digits;
     }
 
-    private static string GenerateTempPassword()
+    public static string GenerateTempPassword()
     {
         const string alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
         var bytes = RandomNumberGenerator.GetBytes(8);

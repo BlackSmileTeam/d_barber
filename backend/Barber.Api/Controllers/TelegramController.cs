@@ -68,7 +68,27 @@ public class TelegramController(
                 client.Name = displayName;
         }
 
+        // Website started registration (telegram-pass) before the chat was linked — finish with thanks + password.
+        string? issuedPassword = null;
+        var websitePending = !created && !client.HasUserPassword && !client.CreatedViaTelegram;
+        if (websitePending)
+        {
+            issuedPassword = AuthController.GenerateTempPassword();
+            client.PasswordHash = BCrypt.Net.BCrypt.HashPassword(issuedPassword);
+            client.HasUserPassword = true;
+        }
+
         await db.SaveChangesAsync(ct);
+
+        if (issuedPassword is not null)
+        {
+            await telegram.NotifyChatAsync(
+                dto.ChatId,
+                "🙏 Спасибо за регистрацию в D_Barber!\n\n"
+                + $"Пароль для входа на сайт: <code>{issuedPassword}</code>",
+                ct);
+        }
+
         return Ok(new
         {
             linked = true,
@@ -76,7 +96,8 @@ public class TelegramController(
             name = client.Name,
             phone = client.Phone,
             chatId = dto.ChatId,
-            hasUserPassword = client.HasUserPassword
+            hasUserPassword = client.HasUserPassword,
+            passwordIssued = issuedPassword is not null
         });
     }
 

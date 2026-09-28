@@ -6,6 +6,8 @@ public record ClientRegisterDto(string Phone, string Password, string Name);
 
 public record ClientLoginDto(string Phone, string Password);
 
+public record TelegramPassDto(string Phone, string? Name);
+
 public record AdminLoginDto(string Login, string Password);
 
 public record ServiceDto(Guid Id, string Name, string? Description, decimal Price, int DurationMinutes, bool IsActive, int SortOrder);

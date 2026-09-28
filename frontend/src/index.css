@@ -414,15 +414,19 @@ body:has(main.landing) .site-header {
   border-radius: 4px;
 }
 
-.auth-page {
+.auth-page.section {
   flex: 1;
-  display: grid;
-  place-items: center;
-  min-height: calc(100vh - 140px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: calc(100vh - var(--header-h) - 4.5rem);
   padding: 2rem 1rem;
+  margin: 0;
 }
 .auth-card {
   width: min(100%, 420px);
+  margin-inline: auto;
   background: rgba(22, 22, 22, 0.92);
   border: 1px solid var(--line);
   padding: 2rem 1.5rem;
@@ -430,7 +434,7 @@ body:has(main.landing) .site-header {
 }
 .auth-card h2 {
   text-align: center;
-  margin-bottom: 1.25rem;
+  margin: 0 0 1.25rem;
   font-family: var(--font-display);
   font-weight: 800;
   font-size: clamp(1.55rem, 5.5vw, 2.15rem);
@@ -440,6 +444,21 @@ body:has(main.landing) .site-header {
 }
 .auth-card .form { max-width: none; width: 100%; }
 .auth-card .btn { width: 100%; }
+.auth-divider {
+  height: 1px;
+  margin: 1.1rem 0;
+  background: var(--line);
+}
+.btn-telegram {
+  background: #229ed9;
+  border-color: #229ed9;
+  color: #fff;
+}
+.btn-telegram:hover {
+  background: #1b8fc5;
+  border-color: #1b8fc5;
+  color: #fff;
+}
 .auth-links {
   margin: 1.25rem 0 0;
   text-align: center;
