@@ -16,11 +16,7 @@ export default function LoginPage() {
     try {
       const { data } = await api.post('/auth/login', { phone, password });
       setAuth(data);
-      show({
-        title: 'Вход выполнен',
-        message: `Добро пожаловать, ${data.name}`,
-        actions: [{ label: 'В кабинет', primary: true, onClick: () => navigate('/cabinet') }],
-      });
+      navigate('/cabinet');
     } catch (err) {
       show({ title: 'Ошибка входа', message: apiErrorMessage(err) });
     }
@@ -37,8 +33,6 @@ export default function LoginPage() {
         </form>
         <p className="auth-links">
           <Link to="/register">Регистрация</Link>
-          {' · '}
-          <Link to="/admin/login">Вход для админа</Link>
         </p>
       </div>
     </section>
