@@ -261,25 +261,40 @@ public static class DbSeeder
         var isSqlite = provider.Contains("Sqlite", StringComparison.OrdinalIgnoreCase);
         if (!isMysql && !isSqlite) return;
 
-        var alters = isMysql
-            ? new[]
-            {
-                "ALTER TABLE SalonSettings ADD COLUMN AboutImageUrl VARCHAR(512) NULL",
-                "ALTER TABLE SalonSettings ADD COLUMN InstagramUrl VARCHAR(512) NULL",
-                "ALTER TABLE SalonSettings ADD COLUMN TelegramUrl VARCHAR(512) NULL",
-                "ALTER TABLE NotificationTemplates ADD COLUMN TriggerDescription VARCHAR(512) NOT NULL DEFAULT ''",
-                "ALTER TABLE NotificationTemplates ADD COLUMN TriggerIntervalType VARCHAR(32) NOT NULL DEFAULT 'None'",
-                "ALTER TABLE NotificationTemplates ADD COLUMN TriggerIntervalDays INT NULL",
-                "ALTER TABLE Clients ADD COLUMN HasUserPassword TINYINT(1) NOT NULL DEFAULT 1",
-                "ALTER TABLE Clients ADD COLUMN CreatedViaTelegram TINYINT(1) NOT NULL DEFAULT 0",
-                "ALTER TABLE Clients ADD COLUMN TelegramUserId BIGINT NULL",
-                "ALTER TABLE Clients ADD COLUMN TelegramUsername VARCHAR(64) NULL",
-                "ALTER TABLE Clients ADD COLUMN TelegramFirstName VARCHAR(128) NULL",
-                "ALTER TABLE Clients ADD COLUMN TelegramLastName VARCHAR(128) NULL",
-                "ALTER TABLE Clients ADD COLUMN TelegramPhotoUrl VARCHAR(512) NULL",
-                "ALTER TABLE Clients ADD COLUMN TelegramAuthAtUtc DATETIME(6) NULL"
-            }
-            : new[]
+        if (isMysql)
+        {
+            await EnsureMysqlColumnAsync(db, "SalonSettings", "AboutImageUrl",
+                "ALTER TABLE SalonSettings ADD COLUMN AboutImageUrl VARCHAR(512) NULL");
+            await EnsureMysqlColumnAsync(db, "SalonSettings", "InstagramUrl",
+                "ALTER TABLE SalonSettings ADD COLUMN InstagramUrl VARCHAR(512) NULL");
+            await EnsureMysqlColumnAsync(db, "SalonSettings", "TelegramUrl",
+                "ALTER TABLE SalonSettings ADD COLUMN TelegramUrl VARCHAR(512) NULL");
+            await EnsureMysqlColumnAsync(db, "NotificationTemplates", "TriggerDescription",
+                "ALTER TABLE NotificationTemplates ADD COLUMN TriggerDescription VARCHAR(512) NOT NULL DEFAULT ''");
+            await EnsureMysqlColumnAsync(db, "NotificationTemplates", "TriggerIntervalType",
+                "ALTER TABLE NotificationTemplates ADD COLUMN TriggerIntervalType VARCHAR(32) NOT NULL DEFAULT 'None'");
+            await EnsureMysqlColumnAsync(db, "NotificationTemplates", "TriggerIntervalDays",
+                "ALTER TABLE NotificationTemplates ADD COLUMN TriggerIntervalDays INT NULL");
+            await EnsureMysqlColumnAsync(db, "Clients", "HasUserPassword",
+                "ALTER TABLE Clients ADD COLUMN HasUserPassword TINYINT(1) NOT NULL DEFAULT 1");
+            await EnsureMysqlColumnAsync(db, "Clients", "CreatedViaTelegram",
+                "ALTER TABLE Clients ADD COLUMN CreatedViaTelegram TINYINT(1) NOT NULL DEFAULT 0");
+            await EnsureMysqlColumnAsync(db, "Clients", "TelegramUserId",
+                "ALTER TABLE Clients ADD COLUMN TelegramUserId BIGINT NULL");
+            await EnsureMysqlColumnAsync(db, "Clients", "TelegramUsername",
+                "ALTER TABLE Clients ADD COLUMN TelegramUsername VARCHAR(64) NULL");
+            await EnsureMysqlColumnAsync(db, "Clients", "TelegramFirstName",
+                "ALTER TABLE Clients ADD COLUMN TelegramFirstName VARCHAR(128) NULL");
+            await EnsureMysqlColumnAsync(db, "Clients", "TelegramLastName",
+                "ALTER TABLE Clients ADD COLUMN TelegramLastName VARCHAR(128) NULL");
+            await EnsureMysqlColumnAsync(db, "Clients", "TelegramPhotoUrl",
+                "ALTER TABLE Clients ADD COLUMN TelegramPhotoUrl VARCHAR(512) NULL");
+            await EnsureMysqlColumnAsync(db, "Clients", "TelegramAuthAtUtc",
+                "ALTER TABLE Clients ADD COLUMN TelegramAuthAtUtc DATETIME(6) NULL");
+        }
+        else
+        {
+            var alters = new[]
             {
                 "ALTER TABLE SalonSettings ADD COLUMN AboutImageUrl TEXT NULL",
                 "ALTER TABLE SalonSettings ADD COLUMN InstagramUrl TEXT NULL",
@@ -296,16 +311,10 @@ public static class DbSeeder
                 "ALTER TABLE Clients ADD COLUMN TelegramPhotoUrl TEXT NULL",
                 "ALTER TABLE Clients ADD COLUMN TelegramAuthAtUtc TEXT NULL"
             };
-
-        foreach (var sql in alters)
-        {
-            try
+            foreach (var sql in alters)
             {
-                await db.Database.ExecuteSqlRawAsync(sql);
-            }
-            catch
-            {
-                // Column already exists.
+                try { await db.Database.ExecuteSqlRawAsync(sql); }
+                catch { /* column exists */ }
             }
         }
 
@@ -339,16 +348,93 @@ public static class DbSeeder
             // Table already exists / provider difference.
         }
 
-        var createTgUserIndex = isMysql
-            ? "CREATE UNIQUE INDEX IX_Clients_TelegramUserId ON Clients (TelegramUserId)"
-            : "CREATE UNIQUE INDEX IF NOT EXISTS IX_Clients_TelegramUserId ON Clients (TelegramUserId)";
+        if (isMysql)
+        {
+            await EnsureMysqlIndexAsync(db, "Clients", "IX_Clients_TelegramUserId",
+                "CREATE UNIQUE INDEX IX_Clients_TelegramUserId ON Clients (TelegramUserId)");
+        }
+        else
+        {
+            try
+            {
+                await db.Database.ExecuteSqlRawAsync(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS IX_Clients_TelegramUserId ON Clients (TelegramUserId)");
+            }
+            catch { /* exists */ }
+        }
+    }
+
+    private static async Task EnsureMysqlColumnAsync(
+        BarberDbContext db, string table, string column, string alterSql)
+    {
         try
         {
-            await db.Database.ExecuteSqlRawAsync(createTgUserIndex);
+            var conn = db.Database.GetDbConnection();
+            if (conn.State != System.Data.ConnectionState.Open)
+                await conn.OpenAsync();
+
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText =
+                """
+                SELECT COUNT(*) FROM information_schema.COLUMNS
+                WHERE TABLE_SCHEMA = DATABASE()
+                  AND TABLE_NAME = @table
+                  AND COLUMN_NAME = @column
+                """;
+            var pTable = cmd.CreateParameter();
+            pTable.ParameterName = "@table";
+            pTable.Value = table;
+            cmd.Parameters.Add(pTable);
+            var pCol = cmd.CreateParameter();
+            pCol.ParameterName = "@column";
+            pCol.Value = column;
+            cmd.Parameters.Add(pCol);
+
+            var exists = Convert.ToInt32(await cmd.ExecuteScalarAsync()) > 0;
+            if (exists) return;
+
+            await db.Database.ExecuteSqlRawAsync(alterSql);
         }
         catch
         {
-            // Index already exists.
+            // Best-effort schema patch.
+        }
+    }
+
+    private static async Task EnsureMysqlIndexAsync(
+        BarberDbContext db, string table, string indexName, string createSql)
+    {
+        try
+        {
+            var conn = db.Database.GetDbConnection();
+            if (conn.State != System.Data.ConnectionState.Open)
+                await conn.OpenAsync();
+
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText =
+                """
+                SELECT COUNT(*) FROM information_schema.STATISTICS
+                WHERE TABLE_SCHEMA = DATABASE()
+                  AND TABLE_NAME = @table
+                  AND INDEX_NAME = @index
+                """;
+            var pTable = cmd.CreateParameter();
+            pTable.ParameterName = "@table";
+            pTable.Value = table;
+            cmd.Parameters.Add(pTable);
+            var pIdx = cmd.CreateParameter();
+            pIdx.ParameterName = "@index";
+            pIdx.Value = indexName;
+            cmd.Parameters.Add(pIdx);
+
+            var exists = Convert.ToInt32(await cmd.ExecuteScalarAsync()) > 0;
+            if (exists) return;
+
+            await db.Database.ExecuteSqlRawAsync(createSql);
+        }
+        catch
+        {
+            // Best-effort index create.
         }
     }
 }

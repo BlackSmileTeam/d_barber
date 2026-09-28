@@ -240,7 +240,7 @@ public sealed class BotWorker(
             if (text.StartsWith("/start", StringComparison.OrdinalIgnoreCase))
             {
                 sessions.Reset(chatId);
-                await SendWelcomeAsync(bot, chatId, ct);
+                await HandleStartAsync(bot, chatId, apiKey, ct);
                 return;
             }
 
@@ -275,7 +275,8 @@ public sealed class BotWorker(
                 return;
             }
 
-            if (IsMainAction(text, "📍 Как добраться", "Как добраться"))
+            if (IsMainAction(text, "📍 Как добраться", "Как добраться")
+                || text.Contains("Как добраться", StringComparison.OrdinalIgnoreCase))
             {
                 await ShowHowToGetAsync(bot, chatId, apiKey, ct);
                 return;
@@ -642,6 +643,30 @@ public sealed class BotWorker(
         return true;
     }
 
+    private async Task HandleStartAsync(ITelegramBotClient bot, long chatId, string apiKey, CancellationToken ct)
+    {
+        var status = await ApiGetStatusAsync(apiKey, $"telegram/appointments?chatId={chatId}", ct);
+        if (status is null)
+        {
+            await bot.SendTextMessageAsync(chatId, MsgSiteUnavailable, replyMarkup: MainMenu(), cancellationToken: ct);
+            return;
+        }
+
+        if (status == HttpStatusCode.OK)
+        {
+            await bot.SendTextMessageAsync(chatId,
+                "👋 <b>Снова здравствуйте!</b>\n\n"
+                + "Можно записаться, посмотреть визиты или открыть «Как добраться».",
+                parseMode: ParseMode.Html,
+                replyMarkup: MainMenu(),
+                cancellationToken: ct);
+            return;
+        }
+
+        sessions.Get(chatId).Mode = BotMode.NeedPhone;
+        await SendWelcomeAsync(bot, chatId, ct);
+    }
+
     private static async Task SendWelcomeAsync(ITelegramBotClient bot, long chatId, CancellationToken ct)
     {
         await bot.SendTextMessageAsync(chatId,
@@ -658,64 +683,67 @@ public sealed class BotWorker(
 
     private async Task ShowHowToGetAsync(ITelegramBotClient bot, long chatId, string apiKey, CancellationToken ct)
     {
-        var salon = await ApiGetAsync<SalonPayload>(apiKey, "salon", ct);
-        if (salon is null || string.IsNullOrWhiteSpace(salon.Address))
+        try
         {
-            await bot.SendTextMessageAsync(chatId, MsgSiteUnavailable, replyMarkup: MainMenu(), cancellationToken: ct);
-            return;
-        }
-
-        var title = string.IsNullOrWhiteSpace(salon.SalonName) ? "D_Barber" : salon.SalonName.Trim();
-        var address = salon.Address.Trim();
-        var encoded = Uri.EscapeDataString(address);
-        var mapUrl = $"https://yandex.ru/maps/?text={encoded}";
-        var routeUrl = $"https://yandex.ru/maps/?rtext=~{encoded}&rtt=auto";
-
-        if (TryParseCoord(salon.MapLat, out var lat) && TryParseCoord(salon.MapLon, out var lon))
-        {
-            try
+            var salon = await ApiGetAsync<SalonPayload>(apiKey, "salon", ct);
+            if (salon is null || string.IsNullOrWhiteSpace(salon.Address))
             {
-                await bot.SendVenueAsync(
+                logger.LogWarning("[{At}] Salon address unavailable for chat {ChatId}", Now(), chatId);
+                await bot.SendTextMessageAsync(
                     chatId,
-                    latitude: lat,
-                    longitude: lon,
-                    title: title,
-                    address: address,
+                    salon is null
+                        ? "📍 Адрес сейчас недоступен. Попробуйте позже."
+                        : "📍 Адрес ещё не указан в настройках салона.",
+                    replyMarkup: MainMenu(),
                     cancellationToken: ct);
+                return;
             }
-            catch (Exception ex)
+
+            var address = salon.Address.Trim();
+            var title = string.IsNullOrWhiteSpace(salon.SalonName) ? "D_Barber" : salon.SalonName.Trim();
+            var encoded = Uri.EscapeDataString(address);
+            var mapUrl = $"https://yandex.ru/maps/?text={encoded}";
+            var routeUrl = $"https://yandex.ru/maps/?rtext=~{encoded}&rtt=auto";
+
+            if (TryParseCoord(salon.MapLat, out var lat) && TryParseCoord(salon.MapLon, out var lon))
             {
-                logger.LogWarning(ex, "[{At}] SendVenue failed for chat {ChatId}", Now(), chatId);
+                try
+                {
+                    await bot.SendLocationAsync(chatId, lat, lon, cancellationToken: ct);
+                }
+                catch (Exception ex)
+                {
+                    logger.LogWarning(ex, "[{At}] SendLocation failed for chat {ChatId}", Now(), chatId);
+                }
             }
+
+            var lines = new List<string> { $"📍 <b>{Html(title)}</b>", Html(address) };
+            if (!string.IsNullOrWhiteSpace(salon.City)) lines.Add($"🏙 {Html(salon.City.Trim())}");
+            if (!string.IsNullOrWhiteSpace(salon.Phone)) lines.Add($"📞 {Html(salon.Phone.Trim())}");
+
+            var keyboard = new InlineKeyboardMarkup(new[]
+            {
+                new[] { InlineKeyboardButton.WithUrl("🗺 Открыть карту", mapUrl) },
+                new[] { InlineKeyboardButton.WithUrl("🚗 Построить маршрут", routeUrl) }
+            });
+
+            await bot.SendTextMessageAsync(
+                chatId,
+                string.Join("\n", lines),
+                parseMode: ParseMode.Html,
+                replyMarkup: keyboard,
+                disableWebPagePreview: true,
+                cancellationToken: ct);
+
+            await bot.SendTextMessageAsync(chatId, "🏠 Главное меню", replyMarkup: MainMenu(), cancellationToken: ct);
         }
-
-        var lines = new List<string>
+        catch (Exception ex)
         {
-            $"📍 <b>{Html(title)}</b>",
-            Html(address)
-        };
-        if (!string.IsNullOrWhiteSpace(salon.City))
-            lines.Add($"🏙 {Html(salon.City.Trim())}");
-        if (!string.IsNullOrWhiteSpace(salon.Phone))
-            lines.Add($"📞 {Html(salon.Phone.Trim())}");
-
-        var keyboard = new InlineKeyboardMarkup(new[]
-        {
-            new[]
-            {
-                InlineKeyboardButton.WithUrl("🗺 Открыть карту", mapUrl),
-                InlineKeyboardButton.WithUrl("🚗 Маршрут", routeUrl)
-            }
-        });
-
-        await bot.SendTextMessageAsync(
-            chatId,
-            string.Join("\n", lines),
-            parseMode: ParseMode.Html,
-            replyMarkup: keyboard,
-            cancellationToken: ct);
-
-        await bot.SendTextMessageAsync(chatId, "🏠 Главное меню", replyMarkup: MainMenu(), cancellationToken: ct);
+            logger.LogError(ex, "[{At}] ShowHowToGet failed ChatId={ChatId}", Now(), chatId);
+            await SafeSend(bot, chatId, "📍 Не удалось показать адрес. Нажмите «Как добраться» ещё раз.", ct);
+            try { await bot.SendTextMessageAsync(chatId, "🏠", replyMarkup: MainMenu(), cancellationToken: ct); }
+            catch { /* ignore */ }
+        }
     }
 
     private static bool TryParseCoord(string? value, out double coord)
@@ -807,8 +835,21 @@ public sealed class BotWorker(
         {
             var api = ApiClient(apiKey);
             using var resp = await api.GetAsync(path, ct);
-            if (!resp.IsSuccessStatusCode) return default;
-            return await resp.Content.ReadFromJsonAsync<T>(JsonOpts, ct);
+            if (!resp.IsSuccessStatusCode)
+            {
+                logger.LogWarning("[{At}] API GET {Path} → HTTP {Status}", Now(), path, (int)resp.StatusCode);
+                return default;
+            }
+
+            try
+            {
+                return await resp.Content.ReadFromJsonAsync<T>(JsonOpts, ct);
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "[{At}] API GET {Path} deserialize failed", Now(), path);
+                return default;
+            }
         }
         catch (Exception ex)
         {
