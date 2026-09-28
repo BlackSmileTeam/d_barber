@@ -40,8 +40,6 @@ internal enum BotMode
     BookPickService,
     BookPickDate,
     BookPickSlot,
-    CancelPick,
-    ReschedulePick,
     ReschedulePickDate,
     ReschedulePickSlot
 }
@@ -126,7 +124,7 @@ public sealed class BotWorker(
                     },
                     receiverOptions: new ReceiverOptions
                     {
-                        AllowedUpdates = [UpdateType.Message],
+                        AllowedUpdates = [UpdateType.Message, UpdateType.CallbackQuery],
                         ThrowPendingUpdates = true
                     },
                     cancellationToken: stoppingToken);
@@ -150,6 +148,13 @@ public sealed class BotWorker(
     private async Task HandleUpdateAsync(ITelegramBotClient bot, Update update, string botToken, CancellationToken ct)
     {
         LogIncomingUpdate(update);
+
+        if (update.CallbackQuery is { } callback)
+        {
+            await HandleCallbackAsync(bot, callback, botToken, ct);
+            return;
+        }
+
         if (update.Message is not { } message) return;
 
         var chatId = message.Chat.Id;
@@ -172,27 +177,9 @@ public sealed class BotWorker(
                 return;
             }
 
-            if (text.StartsWith("/help", StringComparison.OrdinalIgnoreCase)
-                || text.Equals("ℹ️ Помощь", StringComparison.OrdinalIgnoreCase)
-                || text.Equals("Помощь", StringComparison.OrdinalIgnoreCase))
-            {
-                await bot.SendTextMessageAsync(chatId,
-                    "ℹ️ <b>Помощь</b>\n\n"
-                    + "✂️ Записаться — выбрать услугу, день и время\n"
-                    + "📅 Мои записи — ближайшие визиты\n"
-                    + "❌ Отменить — отменить запись\n"
-                    + "🔄 Перенести — выбрать новое время\n\n"
-                    + "Пароль в боте не нужен. Для сайта временный пароль придёт сюда при первом входе.",
-                    parseMode: ParseMode.Html,
-                    replyMarkup: MainMenu(),
-                    cancellationToken: ct);
-                return;
-            }
-
             if (text.StartsWith("/chatid", StringComparison.OrdinalIgnoreCase)
                 || text.StartsWith("/id", StringComparison.OrdinalIgnoreCase))
             {
-                // Quiet admin helper — not advertised in welcome/help.
                 await bot.SendTextMessageAsync(chatId,
                     $"🛠 Chat id: <code>{chatId}</code>",
                     parseMode: ParseMode.Html,
@@ -221,18 +208,6 @@ public sealed class BotWorker(
                 return;
             }
 
-            if (IsMainAction(text, "❌ Отменить запись", "Отменить запись", "Отменить"))
-            {
-                await StartCancelAsync(bot, chatId, botToken, ct);
-                return;
-            }
-
-            if (IsMainAction(text, "🔄 Перенести", "Перенести"))
-            {
-                await StartRescheduleAsync(bot, chatId, botToken, ct);
-                return;
-            }
-
             var phone = ExtractPhone(text);
             if (phone is not null && (session.Mode is BotMode.Idle or BotMode.NeedPhone))
             {
@@ -250,12 +225,6 @@ public sealed class BotWorker(
                     return;
                 case BotMode.BookPickSlot:
                     await HandleBookSlotAsync(bot, chatId, text, botToken, ct);
-                    return;
-                case BotMode.CancelPick:
-                    await HandleCancelPickAsync(bot, chatId, text, botToken, ct);
-                    return;
-                case BotMode.ReschedulePick:
-                    await HandleReschedulePickAsync(bot, chatId, text, botToken, ct);
                     return;
                 case BotMode.ReschedulePickDate:
                     await HandleRescheduleDateAsync(bot, chatId, text, botToken, ct);
@@ -276,6 +245,61 @@ public sealed class BotWorker(
         catch (Exception ex)
         {
             logger.LogError(ex, "[{At}] Failed update UserId={UserId} ChatId={ChatId}", Now(), userId, chatId);
+            await SafeSend(bot, chatId, "⚠️ Временная ошибка. Нажмите /start", ct);
+        }
+    }
+
+    private async Task HandleCallbackAsync(
+        ITelegramBotClient bot, CallbackQuery callback, string botToken, CancellationToken ct)
+    {
+        var chatId = callback.Message?.Chat.Id ?? callback.From.Id;
+        var data = callback.Data ?? "";
+        logger.LogInformation(
+            "[{At}] Callback UserId={UserId} ChatId={ChatId} Data={Data}",
+            Now(), callback.From.Id, chatId, data);
+
+        try
+        {
+            await bot.AnswerCallbackQueryAsync(callback.Id, cancellationToken: ct);
+
+            if (data.StartsWith("cancel:", StringComparison.Ordinal))
+            {
+                var idText = data["cancel:".Length..];
+                if (!Guid.TryParse(idText, out var apptId))
+                {
+                    await bot.SendTextMessageAsync(chatId, "⚠️ Некорректная запись.", replyMarkup: MainMenu(), cancellationToken: ct);
+                    return;
+                }
+
+                var (ok, err, _) = await ApiPostAsync(botToken, $"telegram/appointments/{apptId}/cancel", new { chatId }, ct);
+                await bot.SendTextMessageAsync(chatId,
+                    ok ? "✅ Запись отменена." : $"😔 Не удалось отменить: {err}",
+                    replyMarkup: MainMenu(),
+                    cancellationToken: ct);
+                return;
+            }
+
+            if (data.StartsWith("reschedule:", StringComparison.Ordinal))
+            {
+                var parts = data.Split(':');
+                if (parts.Length < 3
+                    || !Guid.TryParse(parts[1], out var apptId)
+                    || !Guid.TryParse(parts[2], out var serviceId))
+                {
+                    await bot.SendTextMessageAsync(chatId, "⚠️ Некорректная запись.", replyMarkup: MainMenu(), cancellationToken: ct);
+                    return;
+                }
+
+                var session = sessions.Get(chatId);
+                session.Mode = BotMode.ReschedulePickDate;
+                session.AppointmentId = apptId;
+                session.ServiceId = serviceId;
+                await bot.SendTextMessageAsync(chatId, "📅 Выберите новый день:", replyMarkup: DateKeyboard(), cancellationToken: ct);
+            }
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "[{At}] Callback failed ChatId={ChatId}", Now(), chatId);
             await SafeSend(bot, chatId, "⚠️ Временная ошибка. Нажмите /start", ct);
         }
     }
@@ -386,83 +410,8 @@ public sealed class BotWorker(
             return;
         }
 
-        var lines = items.Select(a =>
-        {
-            var name = a.GetProperty("serviceName").GetString();
-            var start = a.GetProperty("startAtUtc").GetDateTime();
-            if (start.Kind == DateTimeKind.Unspecified) start = DateTime.SpecifyKind(start, DateTimeKind.Utc);
-            var local = TimeZoneInfo.ConvertTimeFromUtc(start.ToUniversalTime(), Tz);
-            return $"• ✂️ {name}\n  📅 {local:dd.MM.yyyy} 🕒 {local:HH:mm}";
-        });
-        await bot.SendTextMessageAsync(chatId,
-            "📅 <b>Ваши записи</b>\n\n" + string.Join("\n\n", lines),
-            parseMode: ParseMode.Html,
-            replyMarkup: MainMenu(),
-            cancellationToken: ct);
-    }
+        await bot.SendTextMessageAsync(chatId, "📅 <b>Ваши записи</b>", parseMode: ParseMode.Html, replyMarkup: MainMenu(), cancellationToken: ct);
 
-    private async Task StartCancelAsync(ITelegramBotClient bot, long chatId, string botToken, CancellationToken ct)
-    {
-        if (!await EnsureLinkedAsync(bot, chatId, botToken, ct)) return;
-        var items = await ApiGetAsync<List<JsonElement>>(botToken, $"telegram/appointments?chatId={chatId}", ct);
-        if (items is null || items.Count == 0)
-        {
-            await bot.SendTextMessageAsync(chatId, "📭 Нечего отменять.", replyMarkup: MainMenu(), cancellationToken: ct);
-            return;
-        }
-
-        var session = sessions.Get(chatId);
-        session.Mode = BotMode.CancelPick;
-        session.Appointments = items.Select(a =>
-        {
-            var id = a.GetProperty("id").GetGuid();
-            var name = a.GetProperty("serviceName").GetString() ?? "Услуга";
-            var start = a.GetProperty("startAtUtc").GetDateTime();
-            if (start.Kind == DateTimeKind.Unspecified) start = DateTime.SpecifyKind(start, DateTimeKind.Utc);
-            var local = TimeZoneInfo.ConvertTimeFromUtc(start.ToUniversalTime(), Tz);
-            return (id, $"❌ {name} — {local:dd.MM HH:mm}");
-        }).ToList();
-
-        var rows = session.Appointments.Select(a => new[] { new KeyboardButton(a.Label) }).ToList();
-        rows.Add([new KeyboardButton("🏠 Меню")]);
-        await bot.SendTextMessageAsync(chatId, "❌ Какую запись отменить?",
-            replyMarkup: new ReplyKeyboardMarkup(rows) { ResizeKeyboard = true },
-            cancellationToken: ct);
-    }
-
-    private async Task HandleCancelPickAsync(ITelegramBotClient bot, long chatId, string text, string botToken, CancellationToken ct)
-    {
-        var session = sessions.Get(chatId);
-        var match = session.Appointments.FirstOrDefault(a => a.Label == text);
-        if (match.Id == Guid.Empty)
-        {
-            await bot.SendTextMessageAsync(chatId, "👆 Выберите запись кнопкой.", cancellationToken: ct);
-            return;
-        }
-
-        var (ok, err, _) = await ApiPostAsync(botToken, $"telegram/appointments/{match.Id}/cancel", new { chatId }, ct);
-        sessions.Reset(chatId);
-        await bot.SendTextMessageAsync(chatId,
-            ok ? "✅ Запись отменена." : $"😔 Не удалось отменить: {err}",
-            replyMarkup: MainMenu(),
-            cancellationToken: ct);
-    }
-
-    private async Task StartRescheduleAsync(ITelegramBotClient bot, long chatId, string botToken, CancellationToken ct)
-    {
-        if (!await EnsureLinkedAsync(bot, chatId, botToken, ct)) return;
-        var items = await ApiGetAsync<List<JsonElement>>(botToken, $"telegram/appointments?chatId={chatId}", ct);
-        if (items is null || items.Count == 0)
-        {
-            await bot.SendTextMessageAsync(chatId, "📭 Нечего переносить.", replyMarkup: MainMenu(), cancellationToken: ct);
-            return;
-        }
-
-        var session = sessions.Get(chatId);
-        session.Mode = BotMode.ReschedulePick;
-        session.Appointments = [];
-        session.Slots = [];
-        var rows = new List<KeyboardButton[]>();
         foreach (var a in items)
         {
             var id = a.GetProperty("id").GetGuid();
@@ -471,35 +420,22 @@ public sealed class BotWorker(
             var start = a.GetProperty("startAtUtc").GetDateTime();
             if (start.Kind == DateTimeKind.Unspecified) start = DateTime.SpecifyKind(start, DateTimeKind.Utc);
             var local = TimeZoneInfo.ConvertTimeFromUtc(start.ToUniversalTime(), Tz);
-            var label = $"🔄 {name} — {local:dd.MM HH:mm}";
-            session.Appointments.Add((id, label));
-            session.Slots.Add(($"sid:{id}:{serviceId}", default));
-            rows.Add([new KeyboardButton(label)]);
+
+            var keyboard = new InlineKeyboardMarkup(new[]
+            {
+                new[]
+                {
+                    InlineKeyboardButton.WithCallbackData("❌ Отменить", $"cancel:{id}"),
+                    InlineKeyboardButton.WithCallbackData("🔄 Перенести", $"reschedule:{id}:{serviceId}")
+                }
+            });
+
+            await bot.SendTextMessageAsync(chatId,
+                $"✂️ <b>{name}</b>\n📅 {local:dd.MM.yyyy} 🕒 {local:HH:mm}",
+                parseMode: ParseMode.Html,
+                replyMarkup: keyboard,
+                cancellationToken: ct);
         }
-
-        rows.Add([new KeyboardButton("🏠 Меню")]);
-        await bot.SendTextMessageAsync(chatId, "🔄 Какую запись перенести?",
-            replyMarkup: new ReplyKeyboardMarkup(rows) { ResizeKeyboard = true },
-            cancellationToken: ct);
-    }
-
-    private async Task HandleReschedulePickAsync(ITelegramBotClient bot, long chatId, string text, string botToken, CancellationToken ct)
-    {
-        var session = sessions.Get(chatId);
-        var match = session.Appointments.FirstOrDefault(a => a.Label == text);
-        if (match.Id == Guid.Empty)
-        {
-            await bot.SendTextMessageAsync(chatId, "👆 Выберите запись кнопкой.", cancellationToken: ct);
-            return;
-        }
-
-        session.AppointmentId = match.Id;
-        var sidEntry = session.Slots.FirstOrDefault(s => s.Label.StartsWith($"sid:{match.Id}:", StringComparison.Ordinal));
-        if (sidEntry.Label is string sid && Guid.TryParse(sid.Split(':').LastOrDefault(), out var serviceId))
-            session.ServiceId = serviceId;
-
-        session.Mode = BotMode.ReschedulePickDate;
-        await bot.SendTextMessageAsync(chatId, "📅 Новый день:", replyMarkup: DateKeyboard(), cancellationToken: ct);
     }
 
     private async Task HandleRescheduleDateAsync(ITelegramBotClient bot, long chatId, string text, string botToken, CancellationToken ct)
@@ -586,7 +522,16 @@ public sealed class BotWorker(
         sessions.Reset(chatId);
         if (!ok)
         {
-            await bot.SendTextMessageAsync(chatId, $"😔 Не удалось сохранить номер: {err}", replyMarkup: MainMenu(), cancellationToken: ct);
+            sessions.Get(chatId).Mode = BotMode.NeedPhone;
+            await bot.SendTextMessageAsync(chatId,
+                $"😔 Не удалось сохранить номер: {err}\n\n"
+                + "Проверьте, что API запущен. Локально:\n"
+                + "<code>dotnet run --project Barber.Api --launch-profile http</code>\n"
+                + "Или укажите прод:\n"
+                + "<code>$env:API_BASE_URL=\"http://139.100.225.234:55332/api\"</code>",
+                parseMode: ParseMode.Html,
+                replyMarkup: SharePhoneKeyboard(),
+                cancellationToken: ct);
             return;
         }
 
@@ -601,10 +546,21 @@ public sealed class BotWorker(
 
     private async Task<bool> EnsureLinkedAsync(ITelegramBotClient bot, long chatId, string botToken, CancellationToken ct)
     {
-        var items = await ApiGetAsync<List<JsonElement>>(botToken, $"telegram/appointments?chatId={chatId}", ct);
-        // 404 means not linked — ApiGet returns null; distinguish via ensure check
-        var probe = await ApiRawGetAsync(botToken, $"telegram/appointments?chatId={chatId}", ct);
-        if (probe is { StatusCode: HttpStatusCode.NotFound })
+        var status = await ApiGetStatusAsync(botToken, $"telegram/appointments?chatId={chatId}", ct);
+        if (status is null)
+        {
+            sessions.Get(chatId).Mode = BotMode.NeedPhone;
+            await bot.SendTextMessageAsync(chatId,
+                "😔 Нет связи с сервером API.\n\n"
+                + "Запустите API локально или задайте:\n"
+                + "<code>$env:API_BASE_URL=\"http://139.100.225.234:55332/api\"</code>",
+                parseMode: ParseMode.Html,
+                replyMarkup: SharePhoneKeyboard(),
+                cancellationToken: ct);
+            return false;
+        }
+
+        if (status == HttpStatusCode.NotFound)
         {
             sessions.Get(chatId).Mode = BotMode.NeedPhone;
             await bot.SendTextMessageAsync(chatId,
@@ -614,7 +570,15 @@ public sealed class BotWorker(
             return false;
         }
 
-        _ = items;
+        if (status != HttpStatusCode.OK)
+        {
+            await bot.SendTextMessageAsync(chatId,
+                $"😔 Сервер ответил ошибкой ({(int)status}). Попробуйте позже.",
+                replyMarkup: SharePhoneKeyboard(),
+                cancellationToken: ct);
+            return false;
+        }
+
         return true;
     }
 
@@ -631,16 +595,13 @@ public sealed class BotWorker(
 
     private static ReplyKeyboardMarkup MainMenu() => new(new[]
     {
-        new[] { new KeyboardButton("✂️ Записаться"), new KeyboardButton("📅 Мои записи") },
-        new[] { new KeyboardButton("❌ Отменить запись"), new KeyboardButton("🔄 Перенести") },
-        new[] { new KeyboardButton("ℹ️ Помощь") }
+        new[] { new KeyboardButton("✂️ Записаться"), new KeyboardButton("📅 Мои записи") }
     })
     { ResizeKeyboard = true };
 
     private static ReplyKeyboardMarkup SharePhoneKeyboard() => new(new[]
     {
-        new[] { KeyboardButton.WithRequestContact("📱 Поделиться номером") },
-        new[] { new KeyboardButton("ℹ️ Помощь") }
+        new[] { KeyboardButton.WithRequestContact("📱 Поделиться номером") }
     })
     { ResizeKeyboard = true };
 
@@ -710,15 +671,17 @@ public sealed class BotWorker(
         }
     }
 
-    private async Task<HttpResponseMessage?> ApiRawGetAsync(string botToken, string path, CancellationToken ct)
+    private async Task<HttpStatusCode?> ApiGetStatusAsync(string botToken, string path, CancellationToken ct)
     {
         try
         {
             var api = ApiClient(botToken);
-            return await api.GetAsync(path, ct);
+            using var resp = await api.GetAsync(path, ct);
+            return resp.StatusCode;
         }
-        catch
+        catch (Exception ex)
         {
+            logger.LogWarning(ex, "[{At}] API GET {Path} failed", Now(), path);
             return null;
         }
     }
@@ -749,7 +712,7 @@ public sealed class BotWorker(
         catch (Exception ex)
         {
             logger.LogWarning(ex, "[{At}] API POST {Path} failed", Now(), path);
-            return (false, "нет связи с сервером", null);
+            return (false, "нет связи с сервером API (проверьте, что Barber.Api запущен или задайте API_BASE_URL)", null);
         }
     }
 
