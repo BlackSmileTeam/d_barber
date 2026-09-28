@@ -446,6 +446,13 @@ body:has(main.landing) .site-header {
   color: var(--muted);
 }
 .auth-links a { color: var(--copper); }
+.auth-hint {
+  margin: .85rem 0 0;
+  font-size: .85rem;
+  line-height: 1.4;
+  color: var(--muted);
+  text-align: center;
+}
 
 .section-portfolio {
   background:

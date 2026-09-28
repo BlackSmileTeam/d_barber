@@ -7,6 +7,9 @@ public class Client
     public string PasswordHash { get; set; } = string.Empty;
     public string Name { get; set; } = string.Empty;
     public long? TelegramChatId { get; set; }
+    /// <summary>True after website register or after a login password was issued/chosen.</summary>
+    public bool HasUserPassword { get; set; }
+    public bool CreatedViaTelegram { get; set; }
     public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
     public DateTime? LastVisitAtUtc { get; set; }
 

@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using System.Security.Cryptography;
 using Barber.Application.DTOs;
 using Barber.Domain.Entities;
 using Barber.Infrastructure.Data;
@@ -11,21 +12,34 @@ namespace Barber.Api.Controllers;
 
 [ApiController]
 [Route("api/auth")]
-public class AuthController(BarberDbContext db, JwtTokenService jwt) : ControllerBase
+public class AuthController(BarberDbContext db, JwtTokenService jwt, TelegramNotifyService telegram) : ControllerBase
 {
     [HttpPost("register")]
     public async Task<ActionResult<AuthResponseDto>> Register(ClientRegisterDto dto, CancellationToken ct)
     {
         var phone = NormalizePhone(dto.Phone);
-        if (await db.Clients.AnyAsync(c => c.Phone == phone, ct))
+        var existing = await db.Clients.FirstOrDefaultAsync(c => c.Phone == phone, ct);
+        if (existing is not null)
+        {
+            if (existing.CreatedViaTelegram && !existing.HasUserPassword)
+            {
+                return Conflict(new
+                {
+                    message = "Этот телефон уже есть из Telegram. Войдите по телефону — временный пароль придёт в Telegram."
+                });
+            }
+
             return Conflict(new { message = "Клиент с таким телефоном уже зарегистрирован" });
+        }
 
         var client = new Client
         {
             Id = Guid.NewGuid(),
             Phone = phone,
             Name = dto.Name.Trim(),
-            PasswordHash = BCrypt.Net.BCrypt.HashPassword(dto.Password)
+            PasswordHash = BCrypt.Net.BCrypt.HashPassword(dto.Password),
+            HasUserPassword = true,
+            CreatedViaTelegram = false
         };
         db.Clients.Add(client);
         await db.SaveChangesAsync(ct);
@@ -39,11 +53,44 @@ public class AuthController(BarberDbContext db, JwtTokenService jwt) : Controlle
     {
         var phone = NormalizePhone(dto.Phone);
         var client = await db.Clients.FirstOrDefaultAsync(c => c.Phone == phone, ct);
-        if (client is null || !BCrypt.Net.BCrypt.Verify(dto.Password, client.PasswordHash))
+        if (client is null)
             return Unauthorized(new { message = "Неверный телефон или пароль" });
 
-        var token = jwt.CreateToken(client.Id, "Client", client.Name, client.Phone);
-        return Ok(new AuthResponseDto(token, "Client", client.Name, client.Phone, client.Id));
+        if (client.HasUserPassword)
+        {
+            if (!BCrypt.Net.BCrypt.Verify(dto.Password, client.PasswordHash))
+                return Unauthorized(new { message = "Неверный телефон или пароль" });
+
+            var tokenOk = jwt.CreateToken(client.Id, "Client", client.Name, client.Phone);
+            return Ok(new AuthResponseDto(tokenOk, "Client", client.Name, client.Phone, client.Id));
+        }
+
+        if (client.TelegramChatId is not long chatId)
+        {
+            return Unauthorized(new
+            {
+                message = "Аккаунт создан в Telegram, но чат не привязан. Откройте бота и нажмите /start."
+            });
+        }
+
+        var tempPassword = GenerateTempPassword();
+        client.PasswordHash = BCrypt.Net.BCrypt.HashPassword(tempPassword);
+        client.HasUserPassword = true;
+        await db.SaveChangesAsync(ct);
+
+        await telegram.NotifyChatAsync(
+            chatId,
+            "🔑 Вход на сайт D_Barber\n\n"
+            + $"Ваш временный пароль: <code>{tempPassword}</code>\n\n"
+            + "Введите его на сайте вместе с этим номером телефона.\n"
+            + "Пароль постоянный — сохраните его. Новый код при повторном входе не высылается.",
+            ct);
+
+        return Unauthorized(new
+        {
+            message = "Временный пароль отправлен вам в Telegram. Введите его в поле «Пароль» и войдите снова.",
+            codeSentToTelegram = true
+        });
     }
 
     [HttpPost("admin/login")]
@@ -86,5 +133,15 @@ public class AuthController(BarberDbContext db, JwtTokenService jwt) : Controlle
         if (digits.Length == 10)
             digits = "7" + digits;
         return "+" + digits;
+    }
+
+    private static string GenerateTempPassword()
+    {
+        const string alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
+        var bytes = RandomNumberGenerator.GetBytes(8);
+        var chars = new char[8];
+        for (var i = 0; i < chars.Length; i++)
+            chars[i] = alphabet[bytes[i] % alphabet.Length];
+        return new string(chars);
     }
 }

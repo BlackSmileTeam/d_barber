@@ -269,7 +269,9 @@ public static class DbSeeder
                 "ALTER TABLE SalonSettings ADD COLUMN TelegramUrl VARCHAR(512) NULL",
                 "ALTER TABLE NotificationTemplates ADD COLUMN TriggerDescription VARCHAR(512) NOT NULL DEFAULT ''",
                 "ALTER TABLE NotificationTemplates ADD COLUMN TriggerIntervalType VARCHAR(32) NOT NULL DEFAULT 'None'",
-                "ALTER TABLE NotificationTemplates ADD COLUMN TriggerIntervalDays INT NULL"
+                "ALTER TABLE NotificationTemplates ADD COLUMN TriggerIntervalDays INT NULL",
+                "ALTER TABLE Clients ADD COLUMN HasUserPassword TINYINT(1) NOT NULL DEFAULT 1",
+                "ALTER TABLE Clients ADD COLUMN CreatedViaTelegram TINYINT(1) NOT NULL DEFAULT 0"
             }
             : new[]
             {
@@ -278,7 +280,9 @@ public static class DbSeeder
                 "ALTER TABLE SalonSettings ADD COLUMN TelegramUrl TEXT NULL",
                 "ALTER TABLE NotificationTemplates ADD COLUMN TriggerDescription TEXT NOT NULL DEFAULT ''",
                 "ALTER TABLE NotificationTemplates ADD COLUMN TriggerIntervalType TEXT NOT NULL DEFAULT 'None'",
-                "ALTER TABLE NotificationTemplates ADD COLUMN TriggerIntervalDays INTEGER NULL"
+                "ALTER TABLE NotificationTemplates ADD COLUMN TriggerIntervalDays INTEGER NULL",
+                "ALTER TABLE Clients ADD COLUMN HasUserPassword INTEGER NOT NULL DEFAULT 1",
+                "ALTER TABLE Clients ADD COLUMN CreatedViaTelegram INTEGER NOT NULL DEFAULT 0"
             };
 
         foreach (var sql in alters)

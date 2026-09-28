@@ -152,6 +152,23 @@ public class ApiSmokeTests : IClassFixture<BarberApiFactory>
     }
 
     [Fact]
+    public async Task Telegram_EnsureClient_CreatesAccountWithoutWebsiteRegister()
+    {
+        var phone = $"+7999{Random.Shared.Next(1000000, 9999999)}";
+        using var req = new HttpRequestMessage(HttpMethod.Post, "/api/telegram/ensure-client");
+        req.Headers.TryAddWithoutValidation("X-Telegram-Bot-Token", BarberApiFactory.TestBotToken);
+        req.Content = JsonContent.Create(new { phone, chatId = 777001L, name = "Из Бота" });
+        var created = await _client.SendAsync(req);
+        Assert.Equal(HttpStatusCode.OK, created.StatusCode);
+
+        // First web login issues temp password via Telegram path (HasUserPassword becomes true).
+        var first = await _client.PostAsJsonAsync("/api/auth/login", new { phone, password = "anything" });
+        Assert.Equal(HttpStatusCode.Unauthorized, first.StatusCode);
+        var body = await first.Content.ReadFromJsonAsync<JsonElement>(JsonOpts);
+        Assert.True(body.GetProperty("codeSentToTelegram").GetBoolean());
+    }
+
+    [Fact]
     public async Task Telegram_Link_ByPhone_RequiresBotToken()
     {
         var phone = $"+7999{Random.Shared.Next(1000000, 9999999)}";

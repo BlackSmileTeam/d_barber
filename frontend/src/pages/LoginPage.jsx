@@ -34,6 +34,9 @@ export default function LoginPage() {
         <p className="auth-links">
           <Link to="/register">Регистрация</Link>
         </p>
+        <p className="auth-hint">
+          Если аккаунт создан в Telegram — введите телефон и любой пароль один раз: временный пароль придёт в бот.
+        </p>
       </div>
     </section>
   );
