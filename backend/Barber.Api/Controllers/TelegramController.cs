@@ -42,7 +42,10 @@ public class TelegramController(
         {
             if (p.Phone != phone && !p.Phone.StartsWith("tg:", StringComparison.OrdinalIgnoreCase))
             {
+                // Free both ids so the phone-matched client can own this chat uniquely.
                 p.TelegramChatId = null;
+                if (p.TelegramUserId == dto.ChatId)
+                    p.TelegramUserId = null;
             }
         }
 
@@ -157,13 +160,24 @@ public class TelegramController(
     public async Task<IActionResult> Appointments([FromQuery] long chatId, CancellationToken ct)
     {
         if (!IsBotAuthorized()) return Unauthorized();
-        var client = await db.Clients.AsNoTracking().FirstOrDefaultAsync(c => c.TelegramChatId == chatId, ct);
+        var client = await FindClientByTelegramAsync(chatId, track: true, ct);
         if (client is null)
             return NotFound(new { message = "Сначала поделитесь номером в боте (/start)" });
 
+        // Heal: Login Widget may have set only TelegramUserId, or ChatId was cleared earlier.
+        if (client.TelegramChatId != chatId)
+        {
+            client.TelegramChatId = chatId;
+            client.TelegramUserId ??= chatId;
+            await db.SaveChangesAsync(ct);
+        }
+
         var items = await db.Appointments.AsNoTracking()
             .Include(a => a.Service)
-            .Where(a => a.ClientId == client.Id && a.Status != AppointmentStatus.Cancelled && a.StartAtUtc >= DateTime.UtcNow.AddHours(-1))
+            .Where(a => a.ClientId == client.Id
+                        && a.Status != AppointmentStatus.Cancelled
+                        && a.Status != AppointmentStatus.NoShow
+                        && a.StartAtUtc >= DateTime.UtcNow.AddHours(-1))
             .OrderBy(a => a.StartAtUtc)
             .Select(a => new
             {
@@ -183,9 +197,15 @@ public class TelegramController(
     public async Task<IActionResult> CreateAppointment([FromBody] BotCreateAppointmentDto dto, CancellationToken ct)
     {
         if (!IsBotAuthorized()) return Unauthorized();
-        var client = await db.Clients.FirstOrDefaultAsync(c => c.TelegramChatId == dto.ChatId, ct);
+        var client = await FindClientByTelegramAsync(dto.ChatId, track: true, ct);
         if (client is null)
             return NotFound(new { message = "Сначала поделитесь номером в боте (/start)" });
+        if (client.TelegramChatId != dto.ChatId)
+        {
+            client.TelegramChatId = dto.ChatId;
+            client.TelegramUserId ??= dto.ChatId;
+            await db.SaveChangesAsync(ct);
+        }
 
         var service = await db.Services.FirstOrDefaultAsync(s => s.Id == dto.ServiceId && s.IsActive, ct);
         if (service is null)
@@ -233,8 +253,13 @@ public class TelegramController(
     public async Task<IActionResult> Cancel(Guid id, [FromBody] BotChatDto dto, CancellationToken ct)
     {
         if (!IsBotAuthorized()) return Unauthorized();
-        var client = await db.Clients.FirstOrDefaultAsync(c => c.TelegramChatId == dto.ChatId, ct);
+        var client = await FindClientByTelegramAsync(dto.ChatId, track: true, ct);
         if (client is null) return NotFound(new { message = "Клиент не найден" });
+        if (client.TelegramChatId != dto.ChatId)
+        {
+            client.TelegramChatId = dto.ChatId;
+            client.TelegramUserId ??= dto.ChatId;
+        }
 
         var entity = await db.Appointments.Include(a => a.Service).Include(a => a.Client)
             .FirstOrDefaultAsync(a => a.Id == id && a.ClientId == client.Id, ct);
@@ -252,8 +277,13 @@ public class TelegramController(
     public async Task<IActionResult> Reschedule(Guid id, [FromBody] BotCreateAppointmentDto dto, CancellationToken ct)
     {
         if (!IsBotAuthorized()) return Unauthorized();
-        var client = await db.Clients.FirstOrDefaultAsync(c => c.TelegramChatId == dto.ChatId, ct);
+        var client = await FindClientByTelegramAsync(dto.ChatId, track: true, ct);
         if (client is null) return NotFound(new { message = "Клиент не найден" });
+        if (client.TelegramChatId != dto.ChatId)
+        {
+            client.TelegramChatId = dto.ChatId;
+            client.TelegramUserId ??= dto.ChatId;
+        }
 
         var entity = await db.Appointments.Include(a => a.Service).Include(a => a.Client)
             .FirstOrDefaultAsync(a => a.Id == id && a.ClientId == client.Id, ct);
@@ -333,6 +363,17 @@ public class TelegramController(
         if (!Request.Headers.TryGetValue("X-Bot-Api-Key", out var provided))
             return false;
         return string.Equals(provided.ToString(), expected, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Private chats: chat id == user id. Login Widget stores TelegramUserId;
+    /// bot link stores TelegramChatId. Match either and prefer the tracked entity when healing.
+    /// </summary>
+    private async Task<Client?> FindClientByTelegramAsync(long telegramId, bool track, CancellationToken ct)
+    {
+        var q = track ? db.Clients.AsQueryable() : db.Clients.AsNoTracking();
+        return await q.FirstOrDefaultAsync(
+            c => c.TelegramChatId == telegramId || c.TelegramUserId == telegramId, ct);
     }
 
     private static string? FirstNonEmpty(params string?[] values) =>

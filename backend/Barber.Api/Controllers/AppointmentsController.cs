@@ -139,6 +139,83 @@ public class AppointmentsController(
         return Ok(items.Select(Map));
     }
 
+    [Authorize(Roles = "Admin")]
+    [HttpPost("{id:guid}/admin-status")]
+    public async Task<ActionResult<AppointmentDto>> AdminSetStatus(Guid id, AdminSetAppointmentStatusDto dto, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(dto.Status)
+            || !Enum.TryParse<AppointmentStatus>(dto.Status.Trim(), ignoreCase: true, out var status))
+            return BadRequest(new { message = "Некорректный статус" });
+
+        var allowed = status is AppointmentStatus.Completed or AppointmentStatus.Cancelled
+            or AppointmentStatus.Rescheduled or AppointmentStatus.NoShow or AppointmentStatus.Confirmed;
+        if (!allowed)
+            return BadRequest(new { message = "Этот статус нельзя установить вручную" });
+
+        var entity = await db.Appointments.Include(a => a.Service).Include(a => a.Client)
+            .FirstOrDefaultAsync(a => a.Id == id, ct);
+        if (entity is null) return NotFound(new { message = "Запись не найдена" });
+
+        if (status == AppointmentStatus.Rescheduled)
+        {
+            if (dto.StartAtUtc is null)
+                return BadRequest(new { message = "Для переноса укажите новое время" });
+
+            var start = DateTime.SpecifyKind(dto.StartAtUtc.Value, DateTimeKind.Utc);
+            var end = start.AddMinutes(entity.Service.DurationMinutes);
+            var previousStart = entity.StartAtUtc;
+            var previousEnd = entity.EndAtUtc;
+            var previousStatus = entity.Status;
+
+            entity.StartAtUtc = DateTime.UtcNow.AddYears(100);
+            entity.EndAtUtc = entity.StartAtUtc.AddMinutes(1);
+            await db.SaveChangesAsync(ct);
+
+            var daySlots = await slots.GetAvailableSlotsAsync(entity.ServiceId, DateOnly.FromDateTime(start), ct);
+            if (!daySlots.Any(s => Math.Abs((s - start).TotalSeconds) < 1))
+            {
+                entity.StartAtUtc = previousStart;
+                entity.EndAtUtc = previousEnd;
+                entity.Status = previousStatus;
+                await db.SaveChangesAsync(ct);
+                return Conflict(new { message = "Выбранное время недоступно" });
+            }
+
+            entity.StartAtUtc = start;
+            entity.EndAtUtc = end;
+            entity.Status = AppointmentStatus.Rescheduled;
+            await db.SaveChangesAsync(ct);
+            await telegram.NotifyAdminAsync(db,
+                $"🔄 Перенос (админ): {entity.Client.Name}, {entity.Service.Name}, {entity.StartAtUtc:u}", ct);
+            var notifyId = entity.Client.TelegramChatId ?? entity.Client.TelegramUserId;
+            if (notifyId is long chat)
+                await telegram.NotifyChatAsync(chat,
+                    $"🔄 Запись перенесена: {entity.Service.Name}, {entity.StartAtUtc.ToLocalTime():dd.MM.yyyy HH:mm}", ct);
+            return Ok(Map(entity));
+        }
+
+        entity.Status = status;
+        if (status == AppointmentStatus.Completed)
+        {
+            if (entity.Client.LastVisitAtUtc is null || entity.EndAtUtc > entity.Client.LastVisitAtUtc)
+                entity.Client.LastVisitAtUtc = entity.EndAtUtc;
+        }
+
+        await db.SaveChangesAsync(ct);
+
+        var label = status switch
+        {
+            AppointmentStatus.Completed => "✅ Выполнено",
+            AppointmentStatus.Cancelled => "❌ Отменено",
+            AppointmentStatus.NoShow => "👻 Не пришёл",
+            _ => status.ToString()
+        };
+        await telegram.NotifyAdminAsync(db,
+            $"{label} (админ): {entity.Client.Name}, {entity.Service.Name}, {entity.StartAtUtc:u}", ct);
+
+        return Ok(Map(entity));
+    }
+
     [HttpGet("{id:guid}/calendar.ics")]
     [Authorize(Roles = "Client,Admin")]
     public async Task<IActionResult> CalendarIcs(Guid id, CancellationToken ct)
@@ -162,6 +239,8 @@ public class AppointmentsController(
         await telegram.NotifyAdminAsync(db, text, ct);
         if (entity.Client.TelegramChatId is long chatId)
             await telegram.NotifyChatAsync(chatId, text, ct);
+        else if (entity.Client.TelegramUserId is long userId)
+            await telegram.NotifyChatAsync(userId, text, ct);
     }
 
     public static Dictionary<string, string> BuildValues(Appointment entity, SalonSettings settings, string frontendUrl) => new()

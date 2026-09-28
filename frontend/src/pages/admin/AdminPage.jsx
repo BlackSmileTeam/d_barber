@@ -42,6 +42,25 @@ const INTERVAL_OPTIONS = [
   { value: 'Custom', label: 'Кастомное (дней после визита)' },
 ];
 
+const STATUS_LABELS = {
+  Confirmed: 'Подтверждена',
+  Rescheduled: 'Перенесена',
+  Cancelled: 'Отменена',
+  Completed: 'Выполнена',
+  NoShow: 'Не пришёл',
+};
+
+const STATUS_OPTIONS = [
+  { value: '', label: 'Все статусы' },
+  { value: 'Confirmed', label: 'Подтверждена' },
+  { value: 'Rescheduled', label: 'Перенесена' },
+  { value: 'Completed', label: 'Выполнена' },
+  { value: 'Cancelled', label: 'Отменена' },
+  { value: 'NoShow', label: 'Не пришёл' },
+];
+
+const statusLabel = (s) => STATUS_LABELS[s] || s;
+
 const intervalLabel = (type, days) => {
   switch (type) {
     case 'Monthly': return 'Раз в месяц после визита';
@@ -97,6 +116,13 @@ export default function AdminPage() {
   const [newTemplate, setNewTemplate] = useState(emptyTemplate);
   const [newPortfolio, setNewPortfolio] = useState(emptyPortfolio);
   const [resetDrafts, setResetDrafts] = useState({});
+  const [filterDateFrom, setFilterDateFrom] = useState('');
+  const [filterDateTo, setFilterDateTo] = useState('');
+  const [filterClient, setFilterClient] = useState('');
+  const [filterService, setFilterService] = useState('');
+  const [filterStatus, setFilterStatus] = useState('');
+  const [reschedule, setReschedule] = useState(null); // { id, serviceId, date, slots, slot }
+  const [statusBusy, setStatusBusy] = useState(null);
   const { show } = useModal();
 
   const normalizeTemplate = (t) => ({
@@ -459,8 +485,95 @@ export default function AdminPage() {
     }
   };
 
-  const statusClass = (s) => s.toLowerCase();
+  const statusClass = (s) => (s || '').toLowerCase();
   const aboutPreview = mediaUrl(salon?.aboutImageUrl);
+
+  const filteredAppointments = useMemo(() => {
+    const clientQ = filterClient.trim().toLowerCase();
+    return appointments.filter((a) => {
+      if (filterStatus && a.status !== filterStatus) return false;
+      if (filterService && a.serviceId !== filterService) return false;
+      if (clientQ) {
+        const hay = `${a.clientName || ''} ${a.clientPhone || ''}`.toLowerCase();
+        if (!hay.includes(clientQ)) return false;
+      }
+      const start = new Date(a.startAtUtc);
+      if (filterDateFrom) {
+        const from = new Date(`${filterDateFrom}T00:00:00`);
+        if (start < from) return false;
+      }
+      if (filterDateTo) {
+        const to = new Date(`${filterDateTo}T23:59:59.999`);
+        if (start > to) return false;
+      }
+      return true;
+    });
+  }, [appointments, filterDateFrom, filterDateTo, filterClient, filterService, filterStatus]);
+
+  const statusBars = useMemo(() => {
+    const rows = stats?.byStatus || [];
+    const max = Math.max(1, ...rows.map((r) => r.count || 0));
+    return rows
+      .map((r) => ({
+        key: r.status,
+        label: statusLabel(r.status),
+        count: r.count || 0,
+        pct: Math.round(((r.count || 0) / max) * 100),
+        cls: statusClass(r.status),
+      }))
+      .sort((a, b) => b.count - a.count);
+  }, [stats]);
+
+  const money = (n) => `${Number(n || 0).toLocaleString('ru-RU')} ₽`;
+
+  const setAppointmentStatus = async (appt, status, startAtUtc) => {
+    setStatusBusy(appt.id);
+    try {
+      const { data } = await api.post(`/appointments/${appt.id}/admin-status`, {
+        status,
+        startAtUtc: startAtUtc || null,
+      });
+      setAppointments((prev) => prev.map((x) => (x.id === appt.id ? { ...x, ...data } : x)));
+      setReschedule(null);
+      reload();
+    } catch (err) {
+      show({ title: 'Ошибка', message: apiErrorMessage(err) });
+    } finally {
+      setStatusBusy(null);
+    }
+  };
+
+  const openReschedule = async (appt) => {
+    const local = new Date(appt.startAtUtc);
+    const y = local.getFullYear();
+    const m = String(local.getMonth() + 1).padStart(2, '0');
+    const d = String(local.getDate()).padStart(2, '0');
+    const date = `${y}-${m}-${d}`;
+    setReschedule({ id: appt.id, serviceId: appt.serviceId, date, slots: [], slot: '', appt });
+    try {
+      const { data } = await api.get('/appointments/slots', { params: { serviceId: appt.serviceId, date } });
+      setReschedule((prev) => prev && prev.id === appt.id
+        ? { ...prev, slots: data.slotsUtc || data.SlotsUtc || [] }
+        : prev);
+    } catch (err) {
+      show({ title: 'Ошибка', message: apiErrorMessage(err) });
+    }
+  };
+
+  const loadRescheduleSlots = async (date) => {
+    if (!reschedule) return;
+    setReschedule((prev) => ({ ...prev, date, slots: [], slot: '' }));
+    try {
+      const { data } = await api.get('/appointments/slots', {
+        params: { serviceId: reschedule.serviceId, date },
+      });
+      setReschedule((prev) => prev
+        ? { ...prev, date, slots: data.slotsUtc || data.SlotsUtc || [], slot: '' }
+        : prev);
+    } catch (err) {
+      show({ title: 'Ошибка', message: apiErrorMessage(err) });
+    }
+  };
 
   const renderTriggerFields = (t, onChange) => (
     <>
@@ -617,31 +730,188 @@ export default function AdminPage() {
         {loadFailed && <p className="empty-block">Данные отсутствуют</p>}
 
         {!loadFailed && stats && (
-          <p className="lead">Сегодня подтверждённых: {stats.todayConfirmed} · Отмен: {stats.cancelledTotal} · Переносов: {stats.rescheduledTotal}</p>
+          <div className="admin-metrics">
+            <div className="admin-metric">
+              <span className="admin-metric-label">Сегодня</span>
+              <strong>{stats.todayConfirmed}</strong>
+              <span className="admin-metric-sub">подтверждено</span>
+            </div>
+            <div className="admin-metric">
+              <span className="admin-metric-label">{stats.currentMonth?.label || 'Текущий месяц'}</span>
+              <strong>{stats.currentMonth?.count ?? 0}</strong>
+              <span className="admin-metric-sub">{money(stats.currentMonth?.sum)} · записи</span>
+            </div>
+            <div className="admin-metric">
+              <span className="admin-metric-label">{stats.previousMonth?.label || 'Прошлый месяц'}</span>
+              <strong>{stats.previousMonth?.count ?? 0}</strong>
+              <span className="admin-metric-sub">{money(stats.previousMonth?.sum)} · записи</span>
+            </div>
+            <div className="admin-metric">
+              <span className="admin-metric-label">Отмены / неявки</span>
+              <strong>{(stats.cancelledTotal || 0) + (stats.noShowTotal || 0)}</strong>
+              <span className="admin-metric-sub">отмен: {stats.cancelledTotal || 0} · неявок: {stats.noShowTotal || 0}</span>
+            </div>
+          </div>
         )}
 
         {!loadFailed && tab === 'appointments' && (
-          appointments.length === 0 ? (
-            <p className="empty-block">Данные отсутствуют</p>
-          ) : (
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>Дата</th><th>Клиент</th><th>Услуга</th><th>Статус</th>
-                </tr>
-              </thead>
-              <tbody>
-                {appointments.map((a) => (
-                  <tr key={a.id}>
-                    <td>{new Date(a.startAtUtc).toLocaleString('ru-RU')}</td>
-                    <td>{a.clientName}<br /><span style={{ color: 'var(--muted)' }}>{a.clientPhone}</span></td>
-                    <td>{a.serviceName}</td>
-                    <td><span className={`badge ${statusClass(a.status)}`}>{a.status}</span></td>
+          <>
+            {statusBars.length > 0 && (
+              <div className="admin-infographic panel">
+                <strong className="admin-card-title">Статусы записей</strong>
+                <div className="admin-bars">
+                  {statusBars.map((b) => (
+                    <div key={b.key} className="admin-bar-row">
+                      <span className="admin-bar-label">{b.label}</span>
+                      <div className="admin-bar-track">
+                        <div className={`admin-bar-fill ${b.cls}`} style={{ width: `${b.pct}%` }} />
+                      </div>
+                      <span className="admin-bar-count">{b.count}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div className="admin-filters panel">
+              <label>
+                С даты
+                <input type="date" value={filterDateFrom} onChange={(e) => setFilterDateFrom(e.target.value)} />
+              </label>
+              <label>
+                По дату
+                <input type="date" value={filterDateTo} onChange={(e) => setFilterDateTo(e.target.value)} />
+              </label>
+              <label>
+                Клиент
+                <input
+                  type="search"
+                  placeholder="Имя или телефон"
+                  value={filterClient}
+                  onChange={(e) => setFilterClient(e.target.value)}
+                />
+              </label>
+              <label>
+                Услуга
+                <select value={filterService} onChange={(e) => setFilterService(e.target.value)}>
+                  <option value="">Все услуги</option>
+                  {services.map((s) => (
+                    <option key={s.id} value={s.id}>{s.name}</option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Статус
+                <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)}>
+                  {STATUS_OPTIONS.map((o) => (
+                    <option key={o.value || 'all'} value={o.value}>{o.label}</option>
+                  ))}
+                </select>
+              </label>
+              {(filterDateFrom || filterDateTo || filterClient || filterService || filterStatus) && (
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  onClick={() => {
+                    setFilterDateFrom('');
+                    setFilterDateTo('');
+                    setFilterClient('');
+                    setFilterService('');
+                    setFilterStatus('');
+                  }}
+                >
+                  Сбросить
+                </button>
+              )}
+            </div>
+
+            {reschedule && (
+              <div className="panel admin-reschedule">
+                <strong className="admin-card-title">Перенос: {reschedule.appt?.clientName}</strong>
+                <div className="admin-form-row" style={{ marginTop: '.75rem' }}>
+                  <label>
+                    Дата
+                    <input
+                      type="date"
+                      value={reschedule.date}
+                      onChange={(e) => loadRescheduleSlots(e.target.value)}
+                    />
+                  </label>
+                  <label>
+                    Слот
+                    <select
+                      value={reschedule.slot}
+                      onChange={(e) => setReschedule((prev) => ({ ...prev, slot: e.target.value }))}
+                    >
+                      <option value="">Выберите время</option>
+                      {(reschedule.slots || []).map((s) => (
+                        <option key={s} value={s}>
+                          {new Date(s).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+                <div className="admin-actions" style={{ marginTop: '.75rem' }}>
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    disabled={!reschedule.slot || statusBusy === reschedule.id}
+                    onClick={() => setAppointmentStatus(reschedule.appt, 'Rescheduled', reschedule.slot)}
+                  >
+                    Сохранить перенос
+                  </button>
+                  <button type="button" className="btn btn-ghost" onClick={() => setReschedule(null)}>Отмена</button>
+                </div>
+              </div>
+            )}
+
+            {filteredAppointments.length === 0 ? (
+              <p className="empty-block">Данные отсутствуют</p>
+            ) : (
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>Дата</th><th>Клиент</th><th>Услуга</th><th>Статус</th><th>Действия</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          )
+                </thead>
+                <tbody>
+                  {filteredAppointments.map((a) => (
+                    <tr key={a.id}>
+                      <td>{new Date(a.startAtUtc).toLocaleString('ru-RU')}</td>
+                      <td>
+                        {a.clientName}
+                        <br />
+                        <span style={{ color: 'var(--muted)' }}>{a.clientPhone}</span>
+                      </td>
+                      <td>
+                        {a.serviceName}
+                        <br />
+                        <span style={{ color: 'var(--muted)' }}>{money(a.price)}</span>
+                      </td>
+                      <td><span className={`badge ${statusClass(a.status)}`}>{statusLabel(a.status)}</span></td>
+                      <td>
+                        <div className="admin-appt-actions">
+                          {a.status !== 'Completed' && a.status !== 'Cancelled' && a.status !== 'NoShow' && (
+                            <button type="button" className="btn btn-ghost btn-xs" disabled={statusBusy === a.id} onClick={() => setAppointmentStatus(a, 'Completed')}>Выполнено</button>
+                          )}
+                          {a.status !== 'Cancelled' && a.status !== 'NoShow' && a.status !== 'Completed' && (
+                            <button type="button" className="btn btn-ghost btn-xs" disabled={statusBusy === a.id} onClick={() => openReschedule(a)}>Перенесено</button>
+                          )}
+                          {a.status !== 'Cancelled' && (
+                            <button type="button" className="btn btn-danger btn-xs" disabled={statusBusy === a.id} onClick={() => setAppointmentStatus(a, 'Cancelled')}>Отменено</button>
+                          )}
+                          {a.status !== 'NoShow' && a.status !== 'Completed' && a.status !== 'Cancelled' && (
+                            <button type="button" className="btn btn-ghost btn-xs" disabled={statusBusy === a.id} onClick={() => setAppointmentStatus(a, 'NoShow')}>Не пришёл</button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </>
         )}
 
         {!loadFailed && tab === 'services' && (
@@ -670,34 +940,33 @@ export default function AdminPage() {
             ) : (
               <div className="admin-clients-list">
                 {clients.map((c) => (
-                  <div key={c.id} className="panel admin-client-card">
+                  <div key={c.id} className="admin-client-row">
                     <div className="admin-client-main">
-                      <strong className="admin-card-title">{c.name}</strong>
-                      <p className="admin-key">{c.phone}</p>
+                      <div className="admin-client-line">
+                        <strong>{c.name}</strong>
+                        <span className="admin-key">{c.phone}</span>
+                        {c.telegramLinked && <span className="badge confirmed">TG</span>}
+                      </div>
                       <p className="admin-client-meta">
-                        Регистрация: {new Date(c.createdAtUtc).toLocaleString('ru-RU')}
-                        {c.lastVisitAtUtc ? ` · Последний визит: ${new Date(c.lastVisitAtUtc).toLocaleString('ru-RU')}` : ' · Визитов ещё не было'}
-                        {c.telegramLinked ? ' · Telegram привязан' : ''}
+                        {new Date(c.createdAtUtc).toLocaleDateString('ru-RU')}
+                        {c.lastVisitAtUtc
+                          ? ` · визит ${new Date(c.lastVisitAtUtc).toLocaleDateString('ru-RU')}`
+                          : ' · без визитов'}
                       </p>
                     </div>
-                    <div className="admin-client-reset form">
-                      <label>
-                        Новый пароль
-                        <input
-                          type="text"
-                          value={resetDrafts[c.id] || ''}
-                          onChange={(e) => setResetDrafts((prev) => ({ ...prev, [c.id]: e.target.value }))}
-                          placeholder="Оставьте пустым и сгенерируйте"
-                        />
-                      </label>
-                      <div className="admin-actions">
-                        <button type="button" className="btn btn-primary" onClick={() => resetPassword(c, false)} disabled={!(resetDrafts[c.id] || '').trim()}>
-                          Установить пароль
-                        </button>
-                        <button type="button" className="btn btn-ghost" onClick={() => resetPassword(c, true)}>
-                          Сгенерировать
-                        </button>
-                      </div>
+                    <div className="admin-client-reset">
+                      <input
+                        type="text"
+                        value={resetDrafts[c.id] || ''}
+                        onChange={(e) => setResetDrafts((prev) => ({ ...prev, [c.id]: e.target.value }))}
+                        placeholder="Новый пароль"
+                      />
+                      <button type="button" className="btn btn-ghost btn-xs" onClick={() => resetPassword(c, false)} disabled={!(resetDrafts[c.id] || '').trim()}>
+                        Задать
+                      </button>
+                      <button type="button" className="btn btn-ghost btn-xs" onClick={() => resetPassword(c, true)}>
+                        Сген.
+                      </button>
                     </div>
                   </div>
                 ))}

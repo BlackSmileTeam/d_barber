@@ -20,8 +20,8 @@ export default function CabinetPage() {
   if (!auth) return <Navigate to="/login" replace />;
   if (auth.role !== 'Client') return <Navigate to="/" replace />;
 
-  const upcoming = items.filter((a) => a.status !== 'Cancelled' && new Date(a.startAtUtc) >= new Date());
-  const history = items.filter((a) => a.status === 'Cancelled' || new Date(a.startAtUtc) < new Date());
+  const upcoming = items.filter((a) => a.status !== 'Cancelled' && a.status !== 'NoShow' && a.status !== 'Completed' && new Date(a.startAtUtc) >= new Date());
+  const history = items.filter((a) => a.status === 'Cancelled' || a.status === 'NoShow' || a.status === 'Completed' || new Date(a.startAtUtc) < new Date());
 
   const cancel = async (id) => {
     try {
@@ -129,8 +129,14 @@ export default function CabinetPage() {
     <div className={`appt-row ${a.status === 'Cancelled' ? 'cancelled' : ''} ${a.status === 'Rescheduled' ? 'rescheduled' : ''}`}>
       <strong>{a.serviceName}</strong>
       <div>{new Date(a.startAtUtc).toLocaleString('ru-RU')} · {a.price} ₽</div>
-      <div>Статус: {a.status === 'Cancelled' ? 'Отменена' : a.status === 'Rescheduled' ? 'Перенесена' : 'Подтверждена'}</div>
-      {a.status !== 'Cancelled' && new Date(a.startAtUtc) >= new Date() && (
+      <div>Статус: {
+        a.status === 'Cancelled' ? 'Отменена'
+          : a.status === 'Rescheduled' ? 'Перенесена'
+            : a.status === 'Completed' ? 'Выполнена'
+              : a.status === 'NoShow' ? 'Не пришёл'
+                : 'Подтверждена'
+      }</div>
+      {a.status !== 'Cancelled' && a.status !== 'NoShow' && a.status !== 'Completed' && new Date(a.startAtUtc) >= new Date() && (
         <div className="appt-actions">
           <button type="button" className="btn btn-ghost" onClick={() => askReschedule(a.id)}>Перенести</button>
           <button type="button" className="btn btn-danger" onClick={() => cancel(a.id)}>Отменить</button>

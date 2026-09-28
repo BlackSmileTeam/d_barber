@@ -68,6 +68,7 @@ public sealed class ReminderHostedService(
         var ended = await db.Appointments
             .Include(a => a.Client)
             .Where(a => a.Status != AppointmentStatus.Cancelled
+                        && a.Status != AppointmentStatus.NoShow
                         && a.EndAtUtc <= now
                         && (a.Client.LastVisitAtUtc == null || a.EndAtUtc > a.Client.LastVisitAtUtc))
             .ToListAsync(ct);
@@ -98,6 +99,7 @@ public sealed class ReminderHostedService(
             .Include(a => a.Client)
             .Include(a => a.Service)
             .Where(a => a.Status != AppointmentStatus.Cancelled
+                        && a.Status != AppointmentStatus.NoShow
                         && a.Reminder2hSentAtUtc == null
                         && a.Client.TelegramChatId != null
                         && a.StartAtUtc >= windowStart
@@ -169,7 +171,10 @@ public sealed class ReminderHostedService(
 
                 var lastAppt = await db.Appointments
                     .Include(a => a.Service)
-                    .Where(a => a.ClientId == client.Id && a.Status != AppointmentStatus.Cancelled && a.EndAtUtc <= now)
+                    .Where(a => a.ClientId == client.Id
+                                && a.Status != AppointmentStatus.Cancelled
+                                && a.Status != AppointmentStatus.NoShow
+                                && a.EndAtUtc <= now)
                     .OrderByDescending(a => a.EndAtUtc)
                     .FirstOrDefaultAsync(ct);
 

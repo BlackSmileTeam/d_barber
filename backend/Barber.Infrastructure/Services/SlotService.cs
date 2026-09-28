@@ -36,6 +36,8 @@ public class SlotService(BarberDbContext db)
 
         var appointments = await db.Appointments.AsNoTracking()
             .Where(a => a.Status != AppointmentStatus.Cancelled
+                        && a.Status != AppointmentStatus.NoShow
+                        && a.Status != AppointmentStatus.Completed
                         && a.StartAtUtc < dayEndUtc
                         && a.EndAtUtc > dayStartUtc)
             .Select(a => new { a.StartAtUtc, a.EndAtUtc })

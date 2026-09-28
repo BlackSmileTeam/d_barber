@@ -27,6 +27,8 @@ public record CreateAppointmentDto(Guid ServiceId, DateTime StartAtUtc);
 
 public record RescheduleAppointmentDto(DateTime StartAtUtc);
 
+public record AdminSetAppointmentStatusDto(string Status, DateTime? StartAtUtc);
+
 public record AppointmentDto(
     Guid Id,
     Guid ServiceId,

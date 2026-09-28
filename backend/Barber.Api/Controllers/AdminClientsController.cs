@@ -22,7 +22,7 @@ public class AdminClientsController(BarberDbContext db) : ControllerBase
                 c.Phone,
                 c.CreatedAtUtc,
                 c.LastVisitAtUtc,
-                c.TelegramChatId != null))
+                c.TelegramChatId != null || c.TelegramUserId != null))
             .ToListAsync(ct);
         return Ok(items);
     }

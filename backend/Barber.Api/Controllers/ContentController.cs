@@ -277,7 +277,64 @@ public class ContentController(BarberDbContext db, IWebHostEnvironment env) : Co
         var confirmed = await db.Appointments.CountAsync(a => a.Status == AppointmentStatus.Confirmed && a.StartAtUtc >= today && a.StartAtUtc < tomorrow, ct);
         var cancelled = await db.Appointments.CountAsync(a => a.Status == AppointmentStatus.Cancelled, ct);
         var rescheduled = await db.Appointments.CountAsync(a => a.Status == AppointmentStatus.Rescheduled, ct);
-        return Ok(new { todayConfirmed = confirmed, cancelledTotal = cancelled, rescheduledTotal = rescheduled });
+        var completed = await db.Appointments.CountAsync(a => a.Status == AppointmentStatus.Completed, ct);
+        var noShow = await db.Appointments.CountAsync(a => a.Status == AppointmentStatus.NoShow, ct);
+
+        var settings = await db.SalonSettings.AsNoTracking().FirstAsync(ct);
+        TimeZoneInfo tz;
+        try { tz = TimeZoneInfo.FindSystemTimeZoneById(settings.TimeZoneId); }
+        catch
+        {
+            try { tz = TimeZoneInfo.FindSystemTimeZoneById("Russian Standard Time"); }
+            catch { tz = TimeZoneInfo.Utc; }
+        }
+
+        var localNow = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, tz);
+        var curMonthStartLocal = new DateTime(localNow.Year, localNow.Month, 1, 0, 0, 0, DateTimeKind.Unspecified);
+        var nextMonthStartLocal = curMonthStartLocal.AddMonths(1);
+        var prevMonthStartLocal = curMonthStartLocal.AddMonths(-1);
+        var curMonthStartUtc = TimeZoneInfo.ConvertTimeToUtc(curMonthStartLocal, tz);
+        var nextMonthStartUtc = TimeZoneInfo.ConvertTimeToUtc(nextMonthStartLocal, tz);
+        var prevMonthStartUtc = TimeZoneInfo.ConvertTimeToUtc(prevMonthStartLocal, tz);
+
+        static bool CountsForRevenue(AppointmentStatus s) =>
+            s is AppointmentStatus.Confirmed or AppointmentStatus.Rescheduled or AppointmentStatus.Completed;
+
+        var monthRows = await db.Appointments.AsNoTracking()
+            .Include(a => a.Service)
+            .Where(a => a.StartAtUtc >= prevMonthStartUtc && a.StartAtUtc < nextMonthStartUtc)
+            .Select(a => new { a.StartAtUtc, a.Status, a.Service.Price })
+            .ToListAsync(ct);
+
+        var currentMonth = monthRows.Where(a => a.StartAtUtc >= curMonthStartUtc && a.StartAtUtc < nextMonthStartUtc && CountsForRevenue(a.Status)).ToList();
+        var previousMonth = monthRows.Where(a => a.StartAtUtc >= prevMonthStartUtc && a.StartAtUtc < curMonthStartUtc && CountsForRevenue(a.Status)).ToList();
+
+        var byStatus = await db.Appointments.AsNoTracking()
+            .GroupBy(a => a.Status)
+            .Select(g => new { status = g.Key.ToString(), count = g.Count() })
+            .ToListAsync(ct);
+
+        return Ok(new
+        {
+            todayConfirmed = confirmed,
+            cancelledTotal = cancelled,
+            rescheduledTotal = rescheduled,
+            completedTotal = completed,
+            noShowTotal = noShow,
+            byStatus,
+            currentMonth = new
+            {
+                count = currentMonth.Count,
+                sum = currentMonth.Sum(x => x.Price),
+                label = curMonthStartLocal.ToString("MMMM yyyy", new System.Globalization.CultureInfo("ru-RU"))
+            },
+            previousMonth = new
+            {
+                count = previousMonth.Count,
+                sum = previousMonth.Sum(x => x.Price),
+                label = prevMonthStartLocal.ToString("MMMM yyyy", new System.Globalization.CultureInfo("ru-RU"))
+            }
+        });
     }
 
     private async Task<(string? Value, ActionResult? Result)> SaveUploadAsync(IFormFile file, string prefix, CancellationToken ct)

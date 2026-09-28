@@ -141,11 +141,14 @@ public class AuthController(
             client.Name = dto.Name.Trim();
         }
 
-        if (client.TelegramChatId is not long chatId)
+        var notifyChatId = client.TelegramChatId ?? client.TelegramUserId;
+        if (notifyChatId is null)
         {
             await db.SaveChangesAsync(ct);
             return Ok(new { sent = false, needTelegram = true });
         }
+
+        client.TelegramChatId ??= notifyChatId;
 
         var password = GenerateTempPassword();
         client.PasswordHash = BCrypt.Net.BCrypt.HashPassword(password);
@@ -157,7 +160,7 @@ public class AuthController(
               + $"Пароль для входа на сайт: <code>{password}</code>"
             : $"🔑 Пароль для входа: <code>{password}</code>";
 
-        await telegram.NotifyChatAsync(chatId, text, ct);
+        await telegram.NotifyChatAsync(notifyChatId.Value, text, ct);
         return Ok(new { sent = true, needTelegram = false });
     }
 
@@ -178,7 +181,8 @@ public class AuthController(
             return Ok(new AuthResponseDto(tokenOk, "Client", client.Name, client.Phone, client.Id));
         }
 
-        if (client.TelegramChatId is not long chatId)
+        var notifyChatId = client.TelegramChatId ?? client.TelegramUserId;
+        if (notifyChatId is null)
         {
             return Unauthorized(new
             {
@@ -186,13 +190,15 @@ public class AuthController(
             });
         }
 
+        client.TelegramChatId ??= notifyChatId;
+
         var tempPassword = GenerateTempPassword();
         client.PasswordHash = BCrypt.Net.BCrypt.HashPassword(tempPassword);
         client.HasUserPassword = true;
         await db.SaveChangesAsync(ct);
 
         await telegram.NotifyChatAsync(
-            chatId,
+            notifyChatId.Value,
             "🔑 Вход на сайт D_Barber\n\n"
             + $"Ваш пароль: <code>{tempPassword}</code>",
             ct);

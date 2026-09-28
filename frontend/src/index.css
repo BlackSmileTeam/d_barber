@@ -989,25 +989,98 @@ body:has(main.landing) .site-header {
 .admin-portfolio-preview {
   width: min(100%, 180px); aspect-ratio: 4/5; object-fit: cover; border-radius: 4px;
 }
-.admin-clients-list { display: grid; gap: 1rem; }
+.admin-clients-list { display: grid; gap: .45rem; }
 .admin-client-card {
   display: grid; grid-template-columns: minmax(0, 1fr) minmax(220px, .9fr);
   gap: 1rem 1.5rem; align-items: start;
 }
-.admin-client-meta { margin: .35rem 0 0; color: var(--muted); font-size: .85rem; }
-.admin-client-reset { margin: 0; }
+.admin-client-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: .5rem 1rem;
+  align-items: center;
+  padding: .55rem .75rem;
+  border: 1px solid var(--line);
+  background: var(--bg-elevated);
+}
+.admin-client-line {
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: .45rem .7rem;
+}
+.admin-client-line .admin-key { margin: 0; }
+.admin-client-meta { margin: .15rem 0 0; color: var(--muted); font-size: .78rem; }
+.admin-client-reset {
+  margin: 0;
+  display: flex; align-items: center; gap: .4rem;
+}
+.admin-client-reset input {
+  width: 9.5rem; max-width: 28vw;
+  padding: .35rem .5rem; font-size: .85rem;
+  background: var(--bg-soft); border: 1px solid var(--line); color: var(--text);
+}
+.btn-xs {
+  padding: .25rem .55rem; font-size: .78rem; line-height: 1.2;
+}
+.admin-metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: .75rem;
+  margin-bottom: 1.1rem;
+}
+.admin-metric {
+  border: 1px solid var(--line);
+  background: var(--bg-elevated);
+  padding: .7rem .85rem;
+  display: grid; gap: .15rem;
+}
+.admin-metric-label { color: var(--muted); font-size: .78rem; text-transform: capitalize; }
+.admin-metric strong { font-size: 1.35rem; font-family: var(--font-display); letter-spacing: -0.02em; }
+.admin-metric-sub { color: var(--muted); font-size: .78rem; }
+.admin-infographic { margin-bottom: 1rem; padding: .85rem 1rem; }
+.admin-bars { display: grid; gap: .45rem; margin-top: .7rem; }
+.admin-bar-row {
+  display: grid;
+  grid-template-columns: 7.5rem minmax(0, 1fr) 2rem;
+  gap: .55rem; align-items: center;
+}
+.admin-bar-label { font-size: .82rem; color: var(--muted); }
+.admin-bar-track {
+  height: .45rem; background: var(--bg-soft); border-radius: 2px; overflow: hidden;
+}
+.admin-bar-fill { height: 100%; background: var(--copper); }
+.admin-bar-fill.confirmed { background: var(--ok); }
+.admin-bar-fill.cancelled, .admin-bar-fill.noshow { background: var(--danger); }
+.admin-bar-fill.rescheduled { background: var(--warn); }
+.admin-bar-fill.completed { background: var(--copper); }
+.admin-bar-count { font-size: .82rem; text-align: right; }
+.admin-filters {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: .75rem;
+  align-items: end;
+  margin-bottom: 1rem;
+  padding: .85rem 1rem;
+}
+.admin-filters label { margin: 0; display: grid; gap: .3rem; font-size: .82rem; color: var(--muted); }
+.admin-filters input, .admin-filters select {
+  padding: .4rem .55rem; background: var(--bg-soft); border: 1px solid var(--line); color: var(--text);
+}
+.admin-appt-actions { display: flex; flex-wrap: wrap; gap: .35rem; }
+.admin-reschedule { margin-bottom: 1rem; padding: .85rem 1rem; }
 @media (max-width: 720px) {
   .admin-layout { grid-template-columns: 1fr; }
   .admin-side { border-right: 0; border-bottom: 1px solid var(--line); }
   .admin-service-grid,
-  .admin-client-card { grid-template-columns: 1fr; }
+  .admin-client-card,
+  .admin-client-row { grid-template-columns: 1fr; }
+  .admin-bar-row { grid-template-columns: 5.5rem minmax(0, 1fr) 1.5rem; }
 }
 .table { width: 100%; border-collapse: collapse; }
 .table th, .table td { text-align: left; padding: .7rem; border-bottom: 1px solid var(--line); font-size: .92rem; }
 .badge { font-size: .75rem; padding: .15rem .45rem; border: 1px solid currentColor; }
 .badge.confirmed { color: var(--ok); }
-.badge.cancelled { color: var(--danger); }
+.badge.cancelled, .badge.noshow { color: var(--danger); }
 .badge.rescheduled { color: var(--warn); }
+.badge.completed { color: var(--copper); }
 
 .modal-backdrop {
   position: fixed; inset: 0; background: rgba(0,0,0,.65);
