@@ -68,8 +68,9 @@ public sealed class BotWorker(
     BotSessionStore sessions,
     ILogger<BotWorker> logger) : BackgroundService
 {
-    private const string MsgGenericFail = "😔 Не удалось выполнить действие. Попробуйте позже или нажмите /start.";
-    private const string MsgNeedPhone = "📱 Учётная запись не найдена. Для регистрации необходимо поделиться номером телефона.";
+    private const string MsgGenericFail = "😔 Не получилось выполнить запрос. Выберите действие в меню ещё раз.";
+    private const string MsgSiteUnavailable = "🌐 Сайт сейчас недоступен. Попробуйте через несколько минут.";
+    private const string MsgNeedPhone = "📱 Чтобы продолжить, поделитесь номером телефона кнопкой ниже.";
 
     private static readonly TimeZoneInfo Tz = ResolveTz();
     private static readonly JsonSerializerOptions JsonOpts = new() { PropertyNameCaseInsensitive = true };
@@ -311,7 +312,7 @@ public sealed class BotWorker(
         catch (Exception ex)
         {
             logger.LogError(ex, "[{At}] Failed update UserId={UserId} ChatId={ChatId}", Now(), userId, chatId);
-            await SafeSend(bot, chatId, "⚠️ Временная ошибка. Нажмите /start", ct);
+            await SafeSend(bot, chatId, MsgGenericFail, ct);
         }
     }
 
@@ -340,7 +341,7 @@ public sealed class BotWorker(
                 var (ok, err, _) = await ApiPostAsync(apiKey, $"telegram/appointments/{apptId}/cancel", new { chatId }, ct);
                 if (!ok) logger.LogWarning("[{At}] Cancel failed: {Err}", Now(), err);
                 await bot.SendTextMessageAsync(chatId,
-                    ok ? "✅ Запись отменена." : MsgGenericFail,
+                    ok ? "✅ Запись отменена." : FailMsg(err),
                     replyMarkup: MainMenu(),
                     cancellationToken: ct);
                 return;
@@ -367,7 +368,7 @@ public sealed class BotWorker(
         catch (Exception ex)
         {
             logger.LogError(ex, "[{At}] Callback failed ChatId={ChatId}", Now(), chatId);
-            await SafeSend(bot, chatId, "⚠️ Временная ошибка. Нажмите /start", ct);
+            await SafeSend(bot, chatId, MsgGenericFail, ct);
         }
     }
 
@@ -455,7 +456,7 @@ public sealed class BotWorker(
         if (!ok)
         {
             logger.LogWarning("[{At}] Create appointment failed: {Err}", Now(), err);
-            await bot.SendTextMessageAsync(chatId, MsgGenericFail, replyMarkup: MainMenu(), cancellationToken: ct);
+            await bot.SendTextMessageAsync(chatId, FailMsg(err), replyMarkup: MainMenu(), cancellationToken: ct);
             return;
         }
 
@@ -539,7 +540,7 @@ public sealed class BotWorker(
         await bot.SendTextMessageAsync(chatId,
             ok
                 ? $"✅ Запись перенесена на 📅 {local:dd.MM.yyyy} 🕒 {local:HH:mm}"
-                : MsgGenericFail,
+                : FailMsg(err),
             replyMarkup: MainMenu(),
             cancellationToken: ct);
     }
@@ -593,7 +594,7 @@ public sealed class BotWorker(
         {
             logger.LogWarning("[{At}] Ensure-client failed: {Err}", Now(), err);
             sessions.Get(chatId).Mode = BotMode.NeedPhone;
-            await bot.SendTextMessageAsync(chatId, MsgGenericFail, replyMarkup: SharePhoneKeyboard(), cancellationToken: ct);
+            await bot.SendTextMessageAsync(chatId, FailMsg(err), replyMarkup: SharePhoneKeyboard(), cancellationToken: ct);
             return;
         }
 
@@ -614,7 +615,7 @@ public sealed class BotWorker(
         {
             logger.LogWarning("[{At}] API unreachable while checking link for chat {ChatId}", Now(), chatId);
             sessions.Get(chatId).Mode = BotMode.NeedPhone;
-            await bot.SendTextMessageAsync(chatId, MsgGenericFail, replyMarkup: SharePhoneKeyboard(), cancellationToken: ct);
+            await bot.SendTextMessageAsync(chatId, MsgSiteUnavailable, replyMarkup: MainMenu(), cancellationToken: ct);
             return false;
         }
 
@@ -640,11 +641,14 @@ public sealed class BotWorker(
         await bot.SendTextMessageAsync(chatId,
             "👋 <b>Добро пожаловать в D_Barber!</b>\n\n"
             + "Здесь можно записаться на стрижку, посмотреть свои визиты, отменить или перенести запись.\n\n"
-            + "📱 Учётная запись не найдена. Для регистрации необходимо поделиться номером телефона.",
+            + "Нажмите «Поделиться номером», чтобы начать.",
             parseMode: ParseMode.Html,
             replyMarkup: SharePhoneKeyboard(),
             cancellationToken: ct);
     }
+
+    private static string FailMsg(string? err) =>
+        err == "unreachable" ? MsgSiteUnavailable : MsgGenericFail;
 
     private static ReplyKeyboardMarkup MainMenu() => new(new[]
     {

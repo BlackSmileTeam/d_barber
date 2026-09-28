@@ -635,6 +635,46 @@ body:has(main.landing) .site-header {
   color-scheme: dark;
 }
 .form input:focus, .form textarea:focus { outline: 1px solid var(--copper); }
+.form label.has-error input,
+.form label.has-error textarea,
+.form label.has-error select {
+  border-color: var(--danger);
+  outline: none;
+}
+.form label.has-error input:focus {
+  outline: 1px solid var(--danger);
+}
+.field-error {
+  color: var(--danger);
+  font-size: .8rem;
+  line-height: 1.35;
+}
+.auth-social {
+  display: flex;
+  justify-content: center;
+  margin-top: 1.1rem;
+}
+.auth-tg-icon {
+  display: grid;
+  place-items: center;
+  width: 3rem;
+  height: 3rem;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 50%;
+  background: #229ed9;
+  color: #fff;
+  cursor: pointer;
+  transition: transform .2s var(--ease-out), background .2s;
+}
+.auth-tg-icon:hover:not(:disabled) {
+  background: #1b8fc5;
+  transform: translateY(-1px);
+}
+.auth-tg-icon:disabled {
+  opacity: .55;
+  cursor: not-allowed;
+}
 
 .portfolio-head {
   display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem;

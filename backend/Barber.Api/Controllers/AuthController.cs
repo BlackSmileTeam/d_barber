@@ -65,7 +65,7 @@ public class AuthController(BarberDbContext db, JwtTokenService jwt, TelegramNot
         if (client is null)
         {
             if (string.IsNullOrWhiteSpace(dto.Name))
-                return BadRequest(new { message = "Укажите имя" });
+                return BadRequest(new { message = "Сначала зарегистрируйтесь" });
 
             client = new Client
             {
