@@ -230,3 +230,29 @@ docker run --rm --network bebochka-edge curlimages/curl:8.5.0 -m 15 -I https://a
 4. В логах ожидайте: `Bot authorized as @...` и `Proxy: (configured)`
 
 Бот после фикса ретраит подключение сам (не гасит процесс на первом таймауте). Без доступа к `api.telegram.org` (напрямую или через прокси) отвечать в Telegram он не сможет.
+
+---
+
+## Вход на сайт через Telegram (Login Widget)
+
+Официальная кнопка Telegram на страницах **Вход** и **Регистрация**. API проверяет подпись и сохраняет профиль: `id`, `username`, `first_name`, `last_name`, `photo_url`, `auth_date`.
+
+### Что сделать вам
+
+1. **Домен** для сайта (обязательно). Login Widget **не работает по IP** (`139.100…`). Нужен хост вида `dbarber.example.com` → фронт.
+2. В [@BotFather](https://t.me/BotFather):
+   ```
+   /setdomain
+   ```
+   Выберите бота → укажите домен **без** `https://` и без порта, например `dbarber.example.com`.
+3. GitHub Secrets:
+   | Secret | Значение |
+   |--------|----------|
+   | `TELEGRAM_BOT_TOKEN` | токен бота (уже есть) |
+   | `TELEGRAM_BOT_USERNAME` | username без `@` |
+   | `FRONTEND_PUBLIC_URL` | `https://dbarber.example.com` |
+   | `TELEGRAM_PROXY_URL` | прокси, если бот на сервере не видит Telegram |
+4. Deploy: **Actions → Deploy production**.
+5. Откройте сайт по **домену**, нажмите синюю кнопку Telegram Login.
+
+Телефон виджет не отдаёт. После входа через TG номер можно привязать в боте («Поделиться номером») — аккаунт сольётся.

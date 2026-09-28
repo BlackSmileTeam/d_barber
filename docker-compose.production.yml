@@ -16,6 +16,9 @@ services:
       Jwt__Issuer: ${JWT_ISSUER:-DBarberApi}
       Jwt__Audience: ${JWT_AUDIENCE:-DBarberClient}
       Telegram__AdminChatId: ${TELEGRAM_ADMIN_CHAT_ID:-}
+      Telegram__BotToken: ${TELEGRAM_BOT_TOKEN:-}
+      Telegram__BotUsername: ${TELEGRAM_BOT_USERNAME:-}
+      Bot__ApiKey: ${BOT_API_KEY:-}
       Bot__ApiKey: ${BOT_API_KEY:-}
       App__FrontendPublicUrl: ${FRONTEND_PUBLIC_URL:-}
     ports:

@@ -271,7 +271,13 @@ public static class DbSeeder
                 "ALTER TABLE NotificationTemplates ADD COLUMN TriggerIntervalType VARCHAR(32) NOT NULL DEFAULT 'None'",
                 "ALTER TABLE NotificationTemplates ADD COLUMN TriggerIntervalDays INT NULL",
                 "ALTER TABLE Clients ADD COLUMN HasUserPassword TINYINT(1) NOT NULL DEFAULT 1",
-                "ALTER TABLE Clients ADD COLUMN CreatedViaTelegram TINYINT(1) NOT NULL DEFAULT 0"
+                "ALTER TABLE Clients ADD COLUMN CreatedViaTelegram TINYINT(1) NOT NULL DEFAULT 0",
+                "ALTER TABLE Clients ADD COLUMN TelegramUserId BIGINT NULL",
+                "ALTER TABLE Clients ADD COLUMN TelegramUsername VARCHAR(64) NULL",
+                "ALTER TABLE Clients ADD COLUMN TelegramFirstName VARCHAR(128) NULL",
+                "ALTER TABLE Clients ADD COLUMN TelegramLastName VARCHAR(128) NULL",
+                "ALTER TABLE Clients ADD COLUMN TelegramPhotoUrl VARCHAR(512) NULL",
+                "ALTER TABLE Clients ADD COLUMN TelegramAuthAtUtc DATETIME(6) NULL"
             }
             : new[]
             {
@@ -282,7 +288,13 @@ public static class DbSeeder
                 "ALTER TABLE NotificationTemplates ADD COLUMN TriggerIntervalType TEXT NOT NULL DEFAULT 'None'",
                 "ALTER TABLE NotificationTemplates ADD COLUMN TriggerIntervalDays INTEGER NULL",
                 "ALTER TABLE Clients ADD COLUMN HasUserPassword INTEGER NOT NULL DEFAULT 1",
-                "ALTER TABLE Clients ADD COLUMN CreatedViaTelegram INTEGER NOT NULL DEFAULT 0"
+                "ALTER TABLE Clients ADD COLUMN CreatedViaTelegram INTEGER NOT NULL DEFAULT 0",
+                "ALTER TABLE Clients ADD COLUMN TelegramUserId INTEGER NULL",
+                "ALTER TABLE Clients ADD COLUMN TelegramUsername TEXT NULL",
+                "ALTER TABLE Clients ADD COLUMN TelegramFirstName TEXT NULL",
+                "ALTER TABLE Clients ADD COLUMN TelegramLastName TEXT NULL",
+                "ALTER TABLE Clients ADD COLUMN TelegramPhotoUrl TEXT NULL",
+                "ALTER TABLE Clients ADD COLUMN TelegramAuthAtUtc TEXT NULL"
             };
 
         foreach (var sql in alters)
@@ -325,6 +337,18 @@ public static class DbSeeder
         catch
         {
             // Table already exists / provider difference.
+        }
+
+        var createTgUserIndex = isMysql
+            ? "CREATE UNIQUE INDEX IX_Clients_TelegramUserId ON Clients (TelegramUserId)"
+            : "CREATE UNIQUE INDEX IF NOT EXISTS IX_Clients_TelegramUserId ON Clients (TelegramUserId)";
+        try
+        {
+            await db.Database.ExecuteSqlRawAsync(createTgUserIndex);
+        }
+        catch
+        {
+            // Index already exists.
         }
     }
 }

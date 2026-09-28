@@ -8,6 +8,15 @@ public record ClientLoginDto(string Phone, string Password);
 
 public record TelegramPassDto(string Phone, string? Name);
 
+public record TelegramWidgetLoginDto(
+    long Id,
+    string FirstName,
+    string? LastName,
+    string? Username,
+    string? PhotoUrl,
+    long AuthDate,
+    string Hash);
+
 public record AdminLoginDto(string Login, string Password);
 
 public record ServiceDto(Guid Id, string Name, string? Description, decimal Price, int DurationMinutes, bool IsActive, int SortOrder);

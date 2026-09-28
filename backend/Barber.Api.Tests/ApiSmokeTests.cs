@@ -199,6 +199,56 @@ public class ApiSmokeTests : IClassFixture<BarberApiFactory>
         Assert.True(me.GetProperty("telegramLinked").GetBoolean());
     }
 
+    [Fact]
+    public async Task Telegram_Widget_Login_VerifiesHash_AndStoresProfile()
+    {
+        const string token = "123456:TEST_TOKEN_FOR_WIDGET_HMAC";
+        var id = 900001L + Random.Shared.Next(1, 999);
+        var authDate = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+        var firstName = "Ivan";
+        var username = "ivan_test";
+        var hash = ComputeTelegramLoginHash(token, new Dictionary<string, string>
+        {
+            ["auth_date"] = authDate.ToString(),
+            ["first_name"] = firstName,
+            ["id"] = id.ToString(),
+            ["username"] = username
+        });
+
+        var cfg = await _client.GetFromJsonAsync<JsonElement>("/api/auth/telegram-widget", JsonOpts);
+        Assert.True(cfg.GetProperty("enabled").GetBoolean());
+        Assert.Equal("D_Barber_TestBot", cfg.GetProperty("botUsername").GetString());
+
+        var login = await _client.PostAsJsonAsync("/api/auth/telegram", new
+        {
+            id,
+            firstName,
+            username,
+            authDate,
+            hash
+        });
+        Assert.Equal(HttpStatusCode.OK, login.StatusCode);
+        var auth = await login.Content.ReadFromJsonAsync<AuthDto>(JsonOpts);
+        Assert.NotNull(auth?.Token);
+        Assert.Equal("Ivan", auth.Name);
+
+        _client.DefaultRequestHeaders.Authorization =
+            new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", auth.Token);
+        var me = await _client.GetFromJsonAsync<JsonElement>("/api/auth/me", JsonOpts);
+        Assert.True(me.GetProperty("telegramLinked").GetBoolean());
+        Assert.Equal(username, me.GetProperty("telegramUsername").GetString());
+    }
+
+    private static string ComputeTelegramLoginHash(string botToken, Dictionary<string, string> fields)
+    {
+        var dataCheckString = string.Join('\n', fields.OrderBy(kv => kv.Key, StringComparer.Ordinal)
+            .Select(kv => $"{kv.Key}={kv.Value}"));
+        var secretKey = System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(botToken));
+        var hashBytes = System.Security.Cryptography.HMACSHA256.HashData(
+            secretKey, System.Text.Encoding.UTF8.GetBytes(dataCheckString));
+        return Convert.ToHexString(hashBytes).ToLowerInvariant();
+    }
+
     private sealed record AuthDto(string Token, string Role, string Name, string? Phone, Guid UserId);
     private sealed record ServiceDto(Guid Id, string Name, decimal Price, int DurationMinutes);
     private sealed record SlotsDto(Guid ServiceId, string Date, List<DateTime> SlotsUtc);

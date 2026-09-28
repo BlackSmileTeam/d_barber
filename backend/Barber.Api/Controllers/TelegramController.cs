@@ -36,17 +36,30 @@ public class TelegramController(
         var displayName = string.IsNullOrWhiteSpace(dto.Name) ? "Клиент Telegram" : dto.Name.Trim();
 
         var previous = await db.Clients
-            .Where(c => c.TelegramChatId == dto.ChatId)
+            .Where(c => c.TelegramChatId == dto.ChatId || c.TelegramUserId == dto.ChatId)
             .ToListAsync(ct);
         foreach (var p in previous)
         {
-            if (p.Phone != phone)
+            if (p.Phone != phone && !p.Phone.StartsWith("tg:", StringComparison.OrdinalIgnoreCase))
+            {
                 p.TelegramChatId = null;
+            }
         }
 
         var client = await db.Clients.FirstOrDefaultAsync(c => c.Phone == phone, ct);
+        var byTelegram = await db.Clients.FirstOrDefaultAsync(
+            c => c.TelegramUserId == dto.ChatId || c.TelegramChatId == dto.ChatId, ct);
         var created = false;
-        if (client is null)
+
+        if (client is null && byTelegram is not null)
+        {
+            // Login Widget account with placeholder phone — attach real number.
+            client = byTelegram;
+            client.Phone = phone;
+            if (string.IsNullOrWhiteSpace(client.Name) || client.Name == "Клиент Telegram")
+                client.Name = displayName;
+        }
+        else if (client is null)
         {
             client = new Client
             {
@@ -56,7 +69,8 @@ public class TelegramController(
                 PasswordHash = BCrypt.Net.BCrypt.HashPassword(Convert.ToBase64String(RandomNumberGenerator.GetBytes(32))),
                 HasUserPassword = false,
                 CreatedViaTelegram = true,
-                TelegramChatId = dto.ChatId
+                TelegramChatId = dto.ChatId,
+                TelegramUserId = dto.ChatId
             };
             db.Clients.Add(client);
             created = true;
@@ -64,9 +78,20 @@ public class TelegramController(
         else
         {
             client.TelegramChatId = dto.ChatId;
+            client.TelegramUserId ??= dto.ChatId;
             if (client.CreatedViaTelegram && (string.IsNullOrWhiteSpace(client.Name) || client.Name == "Клиент Telegram"))
                 client.Name = displayName;
+
+            // Drop orphan Login Widget row if phone client is different.
+            if (byTelegram is not null && byTelegram.Id != client.Id
+                && byTelegram.Phone.StartsWith("tg:", StringComparison.OrdinalIgnoreCase))
+            {
+                db.Clients.Remove(byTelegram);
+            }
         }
+
+        client.TelegramChatId = dto.ChatId;
+        client.TelegramUserId ??= dto.ChatId;
 
         // Website started registration (telegram-pass) before the chat was linked — finish with thanks + password.
         string? issuedPassword = null;

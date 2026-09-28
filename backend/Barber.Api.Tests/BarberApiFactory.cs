@@ -21,7 +21,9 @@ public class BarberApiFactory : WebApplicationFactory<Program>
             config.AddInMemoryCollection(new Dictionary<string, string?>
             {
                 ["Bot:ApiKey"] = TestBotApiKey,
-                ["Telegram:AdminChatId"] = "1"
+                ["Telegram:AdminChatId"] = "1",
+                ["Telegram:BotToken"] = "123456:TEST_TOKEN_FOR_WIDGET_HMAC",
+                ["Telegram:BotUsername"] = "D_Barber_TestBot"
             });
         });
         builder.ConfigureServices(services =>

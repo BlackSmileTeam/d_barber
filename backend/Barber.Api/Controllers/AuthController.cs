@@ -12,8 +12,65 @@ namespace Barber.Api.Controllers;
 
 [ApiController]
 [Route("api/auth")]
-public class AuthController(BarberDbContext db, JwtTokenService jwt, TelegramNotifyService telegram) : ControllerBase
+public class AuthController(
+    BarberDbContext db,
+    JwtTokenService jwt,
+    TelegramNotifyService telegram,
+    TelegramLoginVerifier telegramLogin) : ControllerBase
 {
+    [HttpGet("telegram-widget")]
+    public IActionResult TelegramWidgetConfig()
+    {
+        var username = telegramLogin.GetBotUsername();
+        return Ok(new
+        {
+            enabled = telegramLogin.IsConfigured,
+            botUsername = username
+        });
+    }
+
+    /// <summary>Official Telegram Login Widget callback — verifies hash and issues JWT.</summary>
+    [HttpPost("telegram")]
+    public async Task<ActionResult<AuthResponseDto>> TelegramLogin(TelegramWidgetLoginDto dto, CancellationToken ct)
+    {
+        var payload = new TelegramLoginVerifier.Payload(
+            dto.Id,
+            dto.FirstName ?? "",
+            dto.LastName,
+            dto.Username,
+            dto.PhotoUrl,
+            dto.AuthDate,
+            dto.Hash ?? "");
+
+        if (!telegramLogin.TryValidate(payload, out var error))
+            return Unauthorized(new { message = error });
+
+        var client = await db.Clients.FirstOrDefaultAsync(
+            c => c.TelegramUserId == payload.Id || c.TelegramChatId == payload.Id, ct);
+
+        if (client is null)
+        {
+            client = new Client
+            {
+                Id = Guid.NewGuid(),
+                Phone = TelegramLoginVerifier.PlaceholderPhone(payload.Id),
+                Name = TelegramLoginVerifier.DisplayName(payload),
+                PasswordHash = BCrypt.Net.BCrypt.HashPassword(Convert.ToBase64String(RandomNumberGenerator.GetBytes(32))),
+                HasUserPassword = false,
+                CreatedViaTelegram = true,
+                TelegramChatId = payload.Id,
+                TelegramUserId = payload.Id
+            };
+            db.Clients.Add(client);
+        }
+
+        ApplyTelegramProfile(client, payload);
+        await db.SaveChangesAsync(ct);
+
+        var token = jwt.CreateToken(client.Id, "Client", client.Name, client.Phone);
+        return Ok(new AuthResponseDto(token, "Client", client.Name, client.Phone, client.Id));
+    }
+
     [HttpPost("register")]
     public async Task<ActionResult<AuthResponseDto>> Register(ClientRegisterDto dto, CancellationToken ct)
     {
@@ -25,7 +82,7 @@ public class AuthController(BarberDbContext db, JwtTokenService jwt, TelegramNot
             {
                 return Conflict(new
                 {
-                    message = "Этот телефон уже есть из Telegram. Войдите по телефону — временный пароль придёт в Telegram."
+                    message = "Этот телефон уже есть из Telegram. Войдите через Telegram или получите пароль на странице входа."
                 });
             }
 
@@ -95,7 +152,6 @@ public class AuthController(BarberDbContext db, JwtTokenService jwt, TelegramNot
         client.HasUserPassword = true;
         await db.SaveChangesAsync(ct);
 
-        // New accounts complete via ensure-client (thanks + password). Linked users get password only.
         var text = isNew
             ? "🙏 Спасибо за регистрацию в D_Barber!\n\n"
               + $"Пароль для входа на сайт: <code>{password}</code>"
@@ -126,7 +182,7 @@ public class AuthController(BarberDbContext db, JwtTokenService jwt, TelegramNot
         {
             return Unauthorized(new
             {
-                message = "Аккаунт создан в Telegram, но чат не привязан. Откройте бота и нажмите /start."
+                message = "Войдите через Telegram или привяжите номер в боте"
             });
         }
 
@@ -138,14 +194,12 @@ public class AuthController(BarberDbContext db, JwtTokenService jwt, TelegramNot
         await telegram.NotifyChatAsync(
             chatId,
             "🔑 Вход на сайт D_Barber\n\n"
-            + $"Ваш временный пароль: <code>{tempPassword}</code>\n\n"
-            + "Введите его на сайте вместе с этим номером телефона.\n"
-            + "Пароль постоянный — сохраните его. Новый код при повторном входе не высылается.",
+            + $"Ваш пароль: <code>{tempPassword}</code>",
             ct);
 
         return Unauthorized(new
         {
-            message = "Временный пароль отправлен вам в Telegram. Введите его в поле «Пароль» и войдите снова.",
+            message = "Пароль отправлен в Telegram",
             codeSentToTelegram = true
         });
     }
@@ -179,11 +233,24 @@ public class AuthController(BarberDbContext db, JwtTokenService jwt, TelegramNot
         var client = await db.Clients.AsNoTracking().FirstOrDefaultAsync(c => c.Id == userId, ct);
         return client is null
             ? NotFound()
-            : Ok(new { role, name = client.Name, phone = client.Phone, userId = client.Id, telegramLinked = client.TelegramChatId != null });
+            : Ok(new
+            {
+                role,
+                name = client.Name,
+                phone = client.Phone,
+                userId = client.Id,
+                telegramLinked = client.TelegramChatId != null || client.TelegramUserId != null,
+                telegramUsername = client.TelegramUsername,
+                telegramPhotoUrl = client.TelegramPhotoUrl
+            });
     }
 
     public static string NormalizePhone(string phone)
     {
+        if (string.IsNullOrWhiteSpace(phone)) return phone;
+        if (phone.StartsWith("tg:", StringComparison.OrdinalIgnoreCase))
+            return phone.Trim();
+
         var digits = new string(phone.Where(char.IsDigit).ToArray());
         if (digits.StartsWith('8') && digits.Length == 11)
             digits = "7" + digits[1..];
@@ -200,5 +267,20 @@ public class AuthController(BarberDbContext db, JwtTokenService jwt, TelegramNot
         for (var i = 0; i < chars.Length; i++)
             chars[i] = alphabet[bytes[i] % alphabet.Length];
         return new string(chars);
+    }
+
+    private static void ApplyTelegramProfile(Client client, TelegramLoginVerifier.Payload payload)
+    {
+        client.TelegramUserId = payload.Id;
+        client.TelegramChatId ??= payload.Id;
+        client.TelegramUsername = payload.Username;
+        client.TelegramFirstName = payload.FirstName;
+        client.TelegramLastName = payload.LastName;
+        client.TelegramPhotoUrl = payload.PhotoUrl;
+        client.TelegramAuthAtUtc = DateTimeOffset.FromUnixTimeSeconds(payload.AuthDate).UtcDateTime;
+
+        var display = TelegramLoginVerifier.DisplayName(payload);
+        if (string.IsNullOrWhiteSpace(client.Name) || client.Name == "Клиент Telegram")
+            client.Name = display;
     }
 }

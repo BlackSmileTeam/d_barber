@@ -652,7 +652,15 @@ body:has(main.landing) .site-header {
 .auth-social {
   display: flex;
   justify-content: center;
-  margin-top: 1.1rem;
+  margin: .25rem 0 .35rem;
+}
+.telegram-login-host {
+  display: flex;
+  justify-content: center;
+  min-height: 2.5rem;
+}
+.telegram-login-host iframe {
+  margin: 0 auto;
 }
 .auth-tg-icon {
   display: grid;

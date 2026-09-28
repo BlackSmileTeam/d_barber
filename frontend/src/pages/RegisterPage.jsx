@@ -1,8 +1,9 @@
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import api from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import { apiErrorMessage } from '../context/ModalContext';
+import TelegramLoginWidget from '../components/TelegramLoginWidget';
 
 function digitsPhone(value) {
   return (value || '').replace(/\D/g, '');
@@ -56,6 +57,15 @@ export default function RegisterPage() {
     return { phone: msg };
   };
 
+  const onTelegramAuth = useCallback((data) => {
+    setAuth(data);
+    navigate('/cabinet');
+  }, [setAuth, navigate]);
+
+  const onTelegramError = useCallback((message) => {
+    setTgHint(message || 'Не удалось войти через Telegram');
+  }, []);
+
   const submit = async (e) => {
     e.preventDefault();
     setTgHint('');
@@ -80,46 +90,17 @@ export default function RegisterPage() {
     }
   };
 
-  const openBot = async () => {
-    try {
-      const { data } = await api.get('/salon');
-      if (data?.telegramUrl) window.open(data.telegramUrl, '_blank', 'noopener,noreferrer');
-    } catch {
-      /* ignore */
-    }
-  };
-
-  const viaTelegram = async () => {
-    setTgHint('');
-    const next = {
-      name: validateName(name),
-      phone: validatePhone(phone),
-    };
-    Object.keys(next).forEach((k) => { if (!next[k]) delete next[k]; });
-    setErrors(next);
-    if (Object.keys(next).length) return;
-
-    setBusy(true);
-    try {
-      const { data } = await api.post('/auth/telegram-pass', { phone, name: name.trim() });
-      if (data?.needTelegram) {
-        await openBot();
-        setTgHint('Напишите боту и поделитесь номером — пароль придёт в чат');
-        return;
-      }
-      setTgHint('Пароль отправлен в Telegram');
-      navigate('/login');
-    } catch (err) {
-      setErrors(mapApiError(err));
-    } finally {
-      setBusy(false);
-    }
-  };
-
   return (
     <section className="section auth-page">
       <div className="auth-card">
         <h2>Регистрация</h2>
+        <TelegramLoginWidget
+          disabled={busy}
+          onAuth={onTelegramAuth}
+          onError={onTelegramError}
+        />
+        {tgHint && <p className="auth-hint">{tgHint}</p>}
+        <div className="auth-divider" aria-hidden="true" />
         <form className="form" onSubmit={submit} noValidate>
           <label className={errors.name ? 'has-error' : undefined}>
             Имя
@@ -152,11 +133,6 @@ export default function RegisterPage() {
           </label>
           <button className="btn btn-primary" type="submit" disabled={busy}>Создать аккаунт</button>
         </form>
-        <div className="auth-divider" aria-hidden="true" />
-        <button className="btn btn-telegram" type="button" disabled={busy} onClick={viaTelegram}>
-          Войти через Telegram
-        </button>
-        {tgHint && <p className="auth-hint">{tgHint}</p>}
         <p className="auth-links">
           <Link to="/login">Вход</Link>
         </p>

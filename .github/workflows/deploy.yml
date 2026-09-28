@@ -137,6 +137,7 @@ jobs:
           JWT_ISSUER: ${{ secrets.JWT_ISSUER }}
           JWT_AUDIENCE: ${{ secrets.JWT_AUDIENCE }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_BOT_USERNAME: ${{ secrets.TELEGRAM_BOT_USERNAME }}
           TELEGRAM_ADMIN_CHAT_ID: ${{ secrets.TELEGRAM_ADMIN_CHAT_ID }}
           TELEGRAM_PROXY_URL: ${{ secrets.TELEGRAM_PROXY_URL }}
           BOT_API_KEY: ${{ secrets.BOT_API_KEY }}
@@ -146,7 +147,7 @@ jobs:
           key: ${{ secrets.PROD_SSH_PRIVATE_KEY }}
           port: ${{ secrets.PROD_SSH_PORT }}
           command_timeout: 30m
-          envs: JWT_ISSUER,JWT_AUDIENCE,TELEGRAM_BOT_TOKEN,TELEGRAM_ADMIN_CHAT_ID,TELEGRAM_PROXY_URL,BOT_API_KEY
+          envs: JWT_ISSUER,JWT_AUDIENCE,TELEGRAM_BOT_TOKEN,TELEGRAM_BOT_USERNAME,TELEGRAM_ADMIN_CHAT_ID,TELEGRAM_PROXY_URL,BOT_API_KEY
           script: |
             set -euo pipefail
             DEPLOY_ROOT="${{ env.DEPLOY_ROOT }}"
@@ -200,6 +201,8 @@ jobs:
               -e Jwt__Issuer="$JWT_ISSUER" \
               -e Jwt__Audience="$JWT_AUDIENCE" \
               -e Telegram__AdminChatId="${TELEGRAM_ADMIN_CHAT_ID:-}" \
+              -e Telegram__BotToken="${TELEGRAM_BOT_TOKEN:-}" \
+              -e Telegram__BotUsername="${TELEGRAM_BOT_USERNAME:-}" \
               -e Bot__ApiKey="${BOT_API_KEY:-}" \
               -e App__FrontendPublicUrl='${{ secrets.FRONTEND_PUBLIC_URL }}' \
               "$BACKEND_IMAGE:latest"

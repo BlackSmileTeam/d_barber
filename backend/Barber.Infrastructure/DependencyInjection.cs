@@ -28,6 +28,7 @@ public static class DependencyInjection
         services.AddScoped<SlotService>();
         services.AddSingleton<IConfigurationAccessor, ConfigurationAccessor>();
         services.AddScoped<TelegramNotifyService>();
+        services.AddSingleton<TelegramLoginVerifier>();
 
         return services;
     }

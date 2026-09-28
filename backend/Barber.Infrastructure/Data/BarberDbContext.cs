@@ -26,8 +26,13 @@ public class BarberDbContext : DbContext
         modelBuilder.Entity<Client>(e =>
         {
             e.HasIndex(x => x.Phone).IsUnique();
+            e.HasIndex(x => x.TelegramUserId).IsUnique();
             e.Property(x => x.Phone).HasMaxLength(32);
             e.Property(x => x.Name).HasMaxLength(128);
+            e.Property(x => x.TelegramUsername).HasMaxLength(64);
+            e.Property(x => x.TelegramFirstName).HasMaxLength(128);
+            e.Property(x => x.TelegramLastName).HasMaxLength(128);
+            e.Property(x => x.TelegramPhotoUrl).HasMaxLength(512);
         });
 
         modelBuilder.Entity<AdminUser>(e =>
