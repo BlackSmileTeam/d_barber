@@ -1,9 +1,9 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import api, { mediaUrl } from '../services/api';
 
 export default function PortfolioPage() {
   const [items, setItems] = useState([]);
-  const [lightbox, setLightbox] = useState(null);
+  const [lightboxIndex, setLightboxIndex] = useState(null);
   const [failed, setFailed] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const trackRef = useRef(null);
@@ -21,6 +21,31 @@ export default function PortfolioPage() {
       .finally(() => setLoaded(true));
   }, []);
 
+  const closeLightbox = useCallback(() => setLightboxIndex(null), []);
+  const openLightbox = (index) => setLightboxIndex(index);
+
+  const stepLightbox = useCallback((dir) => {
+    setLightboxIndex((current) => {
+      if (current == null || items.length === 0) return current;
+      return (current + dir + items.length) % items.length;
+    });
+  }, [items.length]);
+
+  useEffect(() => {
+    if (lightboxIndex == null) return undefined;
+    const onKey = (e) => {
+      if (e.key === 'Escape') closeLightbox();
+      if (e.key === 'ArrowLeft') stepLightbox(-1);
+      if (e.key === 'ArrowRight') stepLightbox(1);
+    };
+    document.body.style.overflow = 'hidden';
+    window.addEventListener('keydown', onKey);
+    return () => {
+      document.body.style.overflow = '';
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [lightboxIndex, closeLightbox, stepLightbox]);
+
   const scrollBy = (dir) => {
     const el = trackRef.current;
     if (!el) return;
@@ -29,6 +54,7 @@ export default function PortfolioPage() {
   };
 
   const empty = failed || (loaded && items.length === 0);
+  const lightbox = lightboxIndex != null ? items[lightboxIndex] : null;
 
   return (
     <section className="section section-portfolio reveal" id="portfolio">
@@ -59,7 +85,7 @@ export default function PortfolioPage() {
                 className="portfolio-item reveal-child"
                 style={{ '--reveal-delay': `${0.06 + i * 0.05}s` }}
               >
-                <button type="button" className="portfolio-thumb" onClick={() => setLightbox(item)}>
+                <button type="button" className="portfolio-thumb" onClick={() => openLightbox(i)}>
                   <img src={mediaUrl(item.imageUrl)} alt={item.title} />
                   <span className="portfolio-shine" aria-hidden="true" />
                 </button>
@@ -74,15 +100,57 @@ export default function PortfolioPage() {
       </div>
 
       {lightbox && (
-        <div className="lightbox-backdrop" onClick={() => setLightbox(null)} role="presentation">
-          <figure className="lightbox" onClick={(e) => e.stopPropagation()}>
-            <img src={mediaUrl(lightbox.imageUrl)} alt={lightbox.title} />
-            <figcaption>
+        <div className="lightbox-backdrop" onClick={closeLightbox} role="presentation">
+          <div
+            className="lightbox"
+            onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-label={lightbox.title}
+          >
+            <button type="button" className="lightbox-close" onClick={closeLightbox} aria-label="Закрыть">
+              <span aria-hidden="true">×</span>
+              <span className="lightbox-close-label">Закрыть</span>
+            </button>
+
+            {items.length > 1 && (
+              <button
+                type="button"
+                className="lightbox-nav lightbox-prev"
+                onClick={() => stepLightbox(-1)}
+                aria-label="Предыдущая работа"
+              >
+                ‹
+              </button>
+            )}
+
+            <div className="lightbox-stage">
+              <img src={mediaUrl(lightbox.imageUrl)} alt={lightbox.title} />
+            </div>
+
+            {items.length > 1 && (
+              <button
+                type="button"
+                className="lightbox-nav lightbox-next"
+                onClick={() => stepLightbox(1)}
+                aria-label="Следующая работа"
+              >
+                ›
+              </button>
+            )}
+
+            <div className="lightbox-meta">
               <strong>{lightbox.title}</strong>
-              {lightbox.serviceName || ''}
-            </figcaption>
-            <button type="button" className="btn btn-ghost lightbox-close" onClick={() => setLightbox(null)}>Закрыть</button>
-          </figure>
+              {(lightbox.serviceName || lightbox.description) && (
+                <p>{lightbox.serviceName || lightbox.description}</p>
+              )}
+              {items.length > 1 && (
+                <span className="lightbox-counter">
+                  {lightboxIndex + 1} / {items.length}
+                </span>
+              )}
+            </div>
+          </div>
         </div>
       )}
     </section>
