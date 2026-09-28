@@ -156,7 +156,7 @@ public class ApiSmokeTests : IClassFixture<BarberApiFactory>
     {
         var phone = $"+7999{Random.Shared.Next(1000000, 9999999)}";
         using var req = new HttpRequestMessage(HttpMethod.Post, "/api/telegram/ensure-client");
-        req.Headers.TryAddWithoutValidation("X-Telegram-Bot-Token", BarberApiFactory.TestBotToken);
+        req.Headers.TryAddWithoutValidation("X-Bot-Api-Key", BarberApiFactory.TestBotApiKey);
         req.Content = JsonContent.Create(new { phone, chatId = 777001L, name = "Из Бота" });
         var created = await _client.SendAsync(req);
         Assert.Equal(HttpStatusCode.OK, created.StatusCode);
@@ -184,7 +184,7 @@ public class ApiSmokeTests : IClassFixture<BarberApiFactory>
         Assert.Equal(HttpStatusCode.Unauthorized, unauthorized.StatusCode);
 
         using var req = new HttpRequestMessage(HttpMethod.Post, "/api/telegram/link");
-        req.Headers.TryAddWithoutValidation("X-Telegram-Bot-Token", BarberApiFactory.TestBotToken);
+        req.Headers.TryAddWithoutValidation("X-Bot-Api-Key", BarberApiFactory.TestBotApiKey);
         req.Content = JsonContent.Create(new { phone, chatId = 424242L });
         var linked = await _client.SendAsync(req);
         Assert.Equal(HttpStatusCode.OK, linked.StatusCode);

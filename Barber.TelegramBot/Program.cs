@@ -25,7 +25,7 @@ builder.Services.AddHttpClient("api", (sp, client) =>
 {
     var baseUrl = sp.GetRequiredService<IConfiguration>()["Api:BaseUrl"]
         ?? Environment.GetEnvironmentVariable("API_BASE_URL")
-        ?? "http://localhost:5271/api";
+        ?? "http://139.100.225.234:55332/api";
     client.BaseAddress = new Uri(baseUrl.TrimEnd('/') + "/");
     client.Timeout = TimeSpan.FromSeconds(30);
 });
@@ -68,6 +68,9 @@ public sealed class BotWorker(
     BotSessionStore sessions,
     ILogger<BotWorker> logger) : BackgroundService
 {
+    private const string MsgGenericFail = "😔 Не удалось выполнить действие. Попробуйте позже или нажмите /start.";
+    private const string MsgNeedPhone = "📱 Учётная запись не найдена. Для регистрации необходимо поделиться номером телефона.";
+
     private static readonly TimeZoneInfo Tz = ResolveTz();
     private static readonly JsonSerializerOptions JsonOpts = new() { PropertyNameCaseInsensitive = true };
 
@@ -95,11 +98,23 @@ public sealed class BotWorker(
             return;
         }
 
+        var apiKey = ResolveApiKey(config);
+        if (string.IsNullOrWhiteSpace(apiKey))
+        {
+            logger.LogWarning(
+                "[{At}] BOT_API_KEY is not configured — cannot call site API. "
+                + "Set BOT_API_KEY (same value as GitHub secret / Bot:ApiKey on API).",
+                Now());
+            while (!stoppingToken.IsCancellationRequested)
+                await Task.Delay(TimeSpan.FromHours(1), stoppingToken);
+            return;
+        }
+
         logger.LogInformation("[{At}] Token loaded (length {Len}). Waiting for Telegram updates…", Now(), token.Length);
 
         var apiBase = config["Api:BaseUrl"]
             ?? Environment.GetEnvironmentVariable("API_BASE_URL")
-            ?? "http://localhost:5271/api";
+            ?? "http://139.100.225.234:55332/api";
         var proxyUrl = ResolveProxyUrl(config);
         logger.LogInformation("[{At}] D_Barber Telegram bot starting. API: {Api}; Proxy: {Proxy}",
             Now(), apiBase, string.IsNullOrWhiteSpace(proxyUrl) ? "(none)" : "(configured)");
@@ -115,19 +130,29 @@ public sealed class BotWorker(
                 logger.LogInformation("[{At}] Bot authorized as @{Username} (id {Id})", Now(), me.Username, me.Id);
                 delay = TimeSpan.FromSeconds(5);
 
-                await bot.ReceiveAsync(
-                    updateHandler: (client, update, ct) => HandleUpdateAsync(client, update, token, ct),
-                    pollingErrorHandler: (_, ex, _) =>
-                    {
-                        logger.LogError(ex, "[{At}] Telegram polling error", Now());
-                        return Task.CompletedTask;
-                    },
-                    receiverOptions: new ReceiverOptions
-                    {
-                        AllowedUpdates = [UpdateType.Message, UpdateType.CallbackQuery],
-                        ThrowPendingUpdates = true
-                    },
-                    cancellationToken: stoppingToken);
+                using var roundCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+                var outboxTask = PollOutboxAsync(bot, apiKey, roundCts.Token);
+                try
+                {
+                    await bot.ReceiveAsync(
+                        updateHandler: (client, update, ct) => HandleUpdateAsync(client, update, apiKey, ct),
+                        pollingErrorHandler: (_, ex, _) =>
+                        {
+                            logger.LogError(ex, "[{At}] Telegram polling error", Now());
+                            return Task.CompletedTask;
+                        },
+                        receiverOptions: new ReceiverOptions
+                        {
+                            AllowedUpdates = [UpdateType.Message, UpdateType.CallbackQuery],
+                            ThrowPendingUpdates = true
+                        },
+                        cancellationToken: roundCts.Token);
+                }
+                finally
+                {
+                    roundCts.Cancel();
+                    try { await outboxTask; } catch (OperationCanceledException) { /* expected */ }
+                }
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
@@ -145,13 +170,54 @@ public sealed class BotWorker(
         }
     }
 
-    private async Task HandleUpdateAsync(ITelegramBotClient bot, Update update, string botToken, CancellationToken ct)
+    private async Task PollOutboxAsync(ITelegramBotClient bot, string apiKey, CancellationToken ct)
+    {
+        while (!ct.IsCancellationRequested)
+        {
+            try
+            {
+                var items = await ApiGetAsync<List<JsonElement>>(apiKey, "telegram/outbox?take=20", ct);
+                if (items is { Count: > 0 })
+                {
+                    foreach (var item in items)
+                    {
+                        var id = item.GetProperty("id").GetGuid();
+                        var chatId = item.GetProperty("chatId").GetInt64();
+                        var text = item.GetProperty("text").GetString() ?? "";
+                        try
+                        {
+                            await bot.SendTextMessageAsync(chatId, text, parseMode: ParseMode.Html, cancellationToken: ct);
+                            await ApiPostAsync(apiKey, $"telegram/outbox/{id}/ack", new { }, ct);
+                            logger.LogInformation("[{At}] Outbox delivered {Id} → chat {ChatId}", Now(), id, chatId);
+                        }
+                        catch (Exception ex)
+                        {
+                            logger.LogWarning(ex, "[{At}] Outbox send failed {Id} chat {ChatId}", Now(), id, chatId);
+                        }
+                    }
+                }
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                break;
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "[{At}] Outbox poll failed", Now());
+            }
+
+            try { await Task.Delay(TimeSpan.FromSeconds(2), ct); }
+            catch (OperationCanceledException) { break; }
+        }
+    }
+
+    private async Task HandleUpdateAsync(ITelegramBotClient bot, Update update, string apiKey, CancellationToken ct)
     {
         LogIncomingUpdate(update);
 
         if (update.CallbackQuery is { } callback)
         {
-            await HandleCallbackAsync(bot, callback, botToken, ct);
+            await HandleCallbackAsync(bot, callback, apiKey, ct);
             return;
         }
 
@@ -166,7 +232,7 @@ public sealed class BotWorker(
         {
             if (message.Contact is { } contact)
             {
-                await EnsureClientAsync(bot, chatId, contact.PhoneNumber, DisplayName(message.From), botToken, ct);
+                await EnsureClientAsync(bot, chatId, contact.PhoneNumber, DisplayName(message.From), apiKey, ct);
                 return;
             }
 
@@ -198,39 +264,39 @@ public sealed class BotWorker(
 
             if (IsMainAction(text, "✂️ Записаться", "Записаться"))
             {
-                await StartBookingAsync(bot, chatId, botToken, ct);
+                await StartBookingAsync(bot, chatId, apiKey, ct);
                 return;
             }
 
             if (IsMainAction(text, "📅 Мои записи", "Мои записи"))
             {
-                await ShowAppointmentsAsync(bot, chatId, botToken, ct);
+                await ShowAppointmentsAsync(bot, chatId, apiKey, ct);
                 return;
             }
 
             var phone = ExtractPhone(text);
             if (phone is not null && (session.Mode is BotMode.Idle or BotMode.NeedPhone))
             {
-                await EnsureClientAsync(bot, chatId, phone, DisplayName(message.From), botToken, ct);
+                await EnsureClientAsync(bot, chatId, phone, DisplayName(message.From), apiKey, ct);
                 return;
             }
 
             switch (session.Mode)
             {
                 case BotMode.BookPickService:
-                    await HandleBookServiceAsync(bot, chatId, text, botToken, ct);
+                    await HandleBookServiceAsync(bot, chatId, text, apiKey, ct);
                     return;
                 case BotMode.BookPickDate:
-                    await HandleBookDateAsync(bot, chatId, text, botToken, ct);
+                    await HandleBookDateAsync(bot, chatId, text, apiKey, ct);
                     return;
                 case BotMode.BookPickSlot:
-                    await HandleBookSlotAsync(bot, chatId, text, botToken, ct);
+                    await HandleBookSlotAsync(bot, chatId, text, apiKey, ct);
                     return;
                 case BotMode.ReschedulePickDate:
-                    await HandleRescheduleDateAsync(bot, chatId, text, botToken, ct);
+                    await HandleRescheduleDateAsync(bot, chatId, text, apiKey, ct);
                     return;
                 case BotMode.ReschedulePickSlot:
-                    await HandleRescheduleSlotAsync(bot, chatId, text, botToken, ct);
+                    await HandleRescheduleSlotAsync(bot, chatId, text, apiKey, ct);
                     return;
             }
 
@@ -250,7 +316,7 @@ public sealed class BotWorker(
     }
 
     private async Task HandleCallbackAsync(
-        ITelegramBotClient bot, CallbackQuery callback, string botToken, CancellationToken ct)
+        ITelegramBotClient bot, CallbackQuery callback, string apiKey, CancellationToken ct)
     {
         var chatId = callback.Message?.Chat.Id ?? callback.From.Id;
         var data = callback.Data ?? "";
@@ -271,9 +337,10 @@ public sealed class BotWorker(
                     return;
                 }
 
-                var (ok, err, _) = await ApiPostAsync(botToken, $"telegram/appointments/{apptId}/cancel", new { chatId }, ct);
+                var (ok, err, _) = await ApiPostAsync(apiKey, $"telegram/appointments/{apptId}/cancel", new { chatId }, ct);
+                if (!ok) logger.LogWarning("[{At}] Cancel failed: {Err}", Now(), err);
                 await bot.SendTextMessageAsync(chatId,
-                    ok ? "✅ Запись отменена." : $"😔 Не удалось отменить: {err}",
+                    ok ? "✅ Запись отменена." : MsgGenericFail,
                     replyMarkup: MainMenu(),
                     cancellationToken: ct);
                 return;
@@ -304,10 +371,10 @@ public sealed class BotWorker(
         }
     }
 
-    private async Task StartBookingAsync(ITelegramBotClient bot, long chatId, string botToken, CancellationToken ct)
+    private async Task StartBookingAsync(ITelegramBotClient bot, long chatId, string apiKey, CancellationToken ct)
     {
-        if (!await EnsureLinkedAsync(bot, chatId, botToken, ct)) return;
-        var services = await ApiGetAsync<List<JsonElement>>(botToken, "telegram/services", ct);
+        if (!await EnsureLinkedAsync(bot, chatId, apiKey, ct)) return;
+        var services = await ApiGetAsync<List<JsonElement>>(apiKey, "telegram/services", ct);
         if (services is null || services.Count == 0)
         {
             await bot.SendTextMessageAsync(chatId, "😔 Пока нет доступных услуг.", replyMarkup: MainMenu(), cancellationToken: ct);
@@ -340,7 +407,7 @@ public sealed class BotWorker(
             cancellationToken: ct);
     }
 
-    private async Task HandleBookServiceAsync(ITelegramBotClient bot, long chatId, string text, string botToken, CancellationToken ct)
+    private async Task HandleBookServiceAsync(ITelegramBotClient bot, long chatId, string text, string apiKey, CancellationToken ct)
     {
         var session = sessions.Get(chatId);
         var match = session.Appointments.FirstOrDefault(a => a.Label == text);
@@ -359,7 +426,7 @@ public sealed class BotWorker(
             cancellationToken: ct);
     }
 
-    private async Task HandleBookDateAsync(ITelegramBotClient bot, long chatId, string text, string botToken, CancellationToken ct)
+    private async Task HandleBookDateAsync(ITelegramBotClient bot, long chatId, string text, string apiKey, CancellationToken ct)
     {
         var session = sessions.Get(chatId);
         if (!TryParseDayButton(text, out var date))
@@ -369,10 +436,10 @@ public sealed class BotWorker(
         }
 
         session.Date = date;
-        await LoadSlotsAndAskAsync(bot, chatId, botToken, session, forReschedule: false, ct);
+        await LoadSlotsAndAskAsync(bot, chatId, apiKey, session, forReschedule: false, ct);
     }
 
-    private async Task HandleBookSlotAsync(ITelegramBotClient bot, long chatId, string text, string botToken, CancellationToken ct)
+    private async Task HandleBookSlotAsync(ITelegramBotClient bot, long chatId, string text, string apiKey, CancellationToken ct)
     {
         var session = sessions.Get(chatId);
         var slot = session.Slots.FirstOrDefault(s => s.Label == text);
@@ -383,11 +450,12 @@ public sealed class BotWorker(
         }
 
         var body = new { chatId, serviceId = session.ServiceId, startAtUtc = slot.Utc };
-        var (ok, err, data) = await ApiPostAsync(botToken, "telegram/appointments", body, ct);
+        var (ok, err, data) = await ApiPostAsync(apiKey, "telegram/appointments", body, ct);
         sessions.Reset(chatId);
         if (!ok)
         {
-            await bot.SendTextMessageAsync(chatId, $"😔 Не удалось записаться: {err}", replyMarkup: MainMenu(), cancellationToken: ct);
+            logger.LogWarning("[{At}] Create appointment failed: {Err}", Now(), err);
+            await bot.SendTextMessageAsync(chatId, MsgGenericFail, replyMarkup: MainMenu(), cancellationToken: ct);
             return;
         }
 
@@ -400,10 +468,10 @@ public sealed class BotWorker(
         _ = data;
     }
 
-    private async Task ShowAppointmentsAsync(ITelegramBotClient bot, long chatId, string botToken, CancellationToken ct)
+    private async Task ShowAppointmentsAsync(ITelegramBotClient bot, long chatId, string apiKey, CancellationToken ct)
     {
-        if (!await EnsureLinkedAsync(bot, chatId, botToken, ct)) return;
-        var items = await ApiGetAsync<List<JsonElement>>(botToken, $"telegram/appointments?chatId={chatId}", ct);
+        if (!await EnsureLinkedAsync(bot, chatId, apiKey, ct)) return;
+        var items = await ApiGetAsync<List<JsonElement>>(apiKey, $"telegram/appointments?chatId={chatId}", ct);
         if (items is null || items.Count == 0)
         {
             await bot.SendTextMessageAsync(chatId, "📭 Ближайших записей нет.", replyMarkup: MainMenu(), cancellationToken: ct);
@@ -438,7 +506,7 @@ public sealed class BotWorker(
         }
     }
 
-    private async Task HandleRescheduleDateAsync(ITelegramBotClient bot, long chatId, string text, string botToken, CancellationToken ct)
+    private async Task HandleRescheduleDateAsync(ITelegramBotClient bot, long chatId, string text, string apiKey, CancellationToken ct)
     {
         var session = sessions.Get(chatId);
         if (!TryParseDayButton(text, out var date))
@@ -448,10 +516,10 @@ public sealed class BotWorker(
         }
 
         session.Date = date;
-        await LoadSlotsAndAskAsync(bot, chatId, botToken, session, forReschedule: true, ct);
+        await LoadSlotsAndAskAsync(bot, chatId, apiKey, session, forReschedule: true, ct);
     }
 
-    private async Task HandleRescheduleSlotAsync(ITelegramBotClient bot, long chatId, string text, string botToken, CancellationToken ct)
+    private async Task HandleRescheduleSlotAsync(ITelegramBotClient bot, long chatId, string text, string apiKey, CancellationToken ct)
     {
         var session = sessions.Get(chatId);
         var slot = session.Slots.FirstOrDefault(s => s.Label == text);
@@ -461,22 +529,23 @@ public sealed class BotWorker(
             return;
         }
 
-        var (ok, err, _) = await ApiPostAsync(botToken,
+        var (ok, err, _) = await ApiPostAsync(apiKey,
             $"telegram/appointments/{session.AppointmentId}/reschedule",
             new { chatId, serviceId = session.ServiceId, startAtUtc = slot.Utc },
             ct);
         sessions.Reset(chatId);
         var local = TimeZoneInfo.ConvertTimeFromUtc(slot.Utc, Tz);
+        if (!ok) logger.LogWarning("[{At}] Reschedule failed: {Err}", Now(), err);
         await bot.SendTextMessageAsync(chatId,
             ok
                 ? $"✅ Запись перенесена на 📅 {local:dd.MM.yyyy} 🕒 {local:HH:mm}"
-                : $"😔 Не удалось перенести: {err}",
+                : MsgGenericFail,
             replyMarkup: MainMenu(),
             cancellationToken: ct);
     }
 
     private async Task LoadSlotsAndAskAsync(
-        ITelegramBotClient bot, long chatId, string botToken, BotSession session, bool forReschedule, CancellationToken ct)
+        ITelegramBotClient bot, long chatId, string apiKey, BotSession session, bool forReschedule, CancellationToken ct)
     {
         if (session.ServiceId is null || session.Date is null)
         {
@@ -486,7 +555,7 @@ public sealed class BotWorker(
         }
 
         var dateStr = session.Date.Value.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
-        var resp = await ApiGetAsync<SlotsPayload>(botToken, $"telegram/slots?serviceId={session.ServiceId}&date={dateStr}", ct);
+        var resp = await ApiGetAsync<SlotsPayload>(apiKey, $"telegram/slots?serviceId={session.ServiceId}&date={dateStr}", ct);
         if (resp?.SlotsUtc is null || resp.SlotsUtc.Count == 0)
         {
             await bot.SendTextMessageAsync(chatId,
@@ -515,23 +584,16 @@ public sealed class BotWorker(
     }
 
     private async Task EnsureClientAsync(
-        ITelegramBotClient bot, long chatId, string rawPhone, string name, string botToken, CancellationToken ct)
+        ITelegramBotClient bot, long chatId, string rawPhone, string name, string apiKey, CancellationToken ct)
     {
-        var (ok, err, data) = await ApiPostAsync(botToken, "telegram/ensure-client",
+        var (ok, err, data) = await ApiPostAsync(apiKey, "telegram/ensure-client",
             new { phone = rawPhone, chatId, name }, ct);
         sessions.Reset(chatId);
         if (!ok)
         {
+            logger.LogWarning("[{At}] Ensure-client failed: {Err}", Now(), err);
             sessions.Get(chatId).Mode = BotMode.NeedPhone;
-            await bot.SendTextMessageAsync(chatId,
-                $"😔 Не удалось сохранить номер: {err}\n\n"
-                + "Проверьте, что API запущен. Локально:\n"
-                + "<code>dotnet run --project Barber.Api --launch-profile http</code>\n"
-                + "Или укажите прод:\n"
-                + "<code>$env:API_BASE_URL=\"http://139.100.225.234:55332/api\"</code>",
-                parseMode: ParseMode.Html,
-                replyMarkup: SharePhoneKeyboard(),
-                cancellationToken: ct);
+            await bot.SendTextMessageAsync(chatId, MsgGenericFail, replyMarkup: SharePhoneKeyboard(), cancellationToken: ct);
             return;
         }
 
@@ -544,38 +606,28 @@ public sealed class BotWorker(
             cancellationToken: ct);
     }
 
-    private async Task<bool> EnsureLinkedAsync(ITelegramBotClient bot, long chatId, string botToken, CancellationToken ct)
+    private async Task<bool> EnsureLinkedAsync(ITelegramBotClient bot, long chatId, string apiKey, CancellationToken ct)
     {
-        var status = await ApiGetStatusAsync(botToken, $"telegram/appointments?chatId={chatId}", ct);
+        var status = await ApiGetStatusAsync(apiKey, $"telegram/appointments?chatId={chatId}", ct);
         if (status is null)
         {
+            logger.LogWarning("[{At}] API unreachable while checking link for chat {ChatId}", Now(), chatId);
             sessions.Get(chatId).Mode = BotMode.NeedPhone;
-            await bot.SendTextMessageAsync(chatId,
-                "😔 Нет связи с сервером API.\n\n"
-                + "Запустите API локально или задайте:\n"
-                + "<code>$env:API_BASE_URL=\"http://139.100.225.234:55332/api\"</code>",
-                parseMode: ParseMode.Html,
-                replyMarkup: SharePhoneKeyboard(),
-                cancellationToken: ct);
+            await bot.SendTextMessageAsync(chatId, MsgGenericFail, replyMarkup: SharePhoneKeyboard(), cancellationToken: ct);
             return false;
         }
 
         if (status == HttpStatusCode.NotFound)
         {
             sessions.Get(chatId).Mode = BotMode.NeedPhone;
-            await bot.SendTextMessageAsync(chatId,
-                "📱 Учётная запись не найдена. Для регистрации необходимо поделиться номером телефона.",
-                replyMarkup: SharePhoneKeyboard(),
-                cancellationToken: ct);
+            await bot.SendTextMessageAsync(chatId, MsgNeedPhone, replyMarkup: SharePhoneKeyboard(), cancellationToken: ct);
             return false;
         }
 
         if (status != HttpStatusCode.OK)
         {
-            await bot.SendTextMessageAsync(chatId,
-                $"😔 Сервер ответил ошибкой ({(int)status}). Попробуйте позже.",
-                replyMarkup: SharePhoneKeyboard(),
-                cancellationToken: ct);
+            logger.LogWarning("[{At}] Link check HTTP {Status} for chat {ChatId}", Now(), (int)status, chatId);
+            await bot.SendTextMessageAsync(chatId, MsgGenericFail, replyMarkup: SharePhoneKeyboard(), cancellationToken: ct);
             return false;
         }
 
@@ -647,19 +699,19 @@ public sealed class BotWorker(
         return string.IsNullOrWhiteSpace(name) ? (from.Username ?? "Клиент Telegram") : name;
     }
 
-    private HttpClient ApiClient(string botToken)
+    private HttpClient ApiClient(string apiKey)
     {
         var api = httpClientFactory.CreateClient("api");
-        api.DefaultRequestHeaders.Remove("X-Telegram-Bot-Token");
-        api.DefaultRequestHeaders.TryAddWithoutValidation("X-Telegram-Bot-Token", botToken);
+        api.DefaultRequestHeaders.Remove("X-Bot-Api-Key");
+        api.DefaultRequestHeaders.TryAddWithoutValidation("X-Bot-Api-Key", apiKey);
         return api;
     }
 
-    private async Task<T?> ApiGetAsync<T>(string botToken, string path, CancellationToken ct)
+    private async Task<T?> ApiGetAsync<T>(string apiKey, string path, CancellationToken ct)
     {
         try
         {
-            var api = ApiClient(botToken);
+            var api = ApiClient(apiKey);
             using var resp = await api.GetAsync(path, ct);
             if (!resp.IsSuccessStatusCode) return default;
             return await resp.Content.ReadFromJsonAsync<T>(JsonOpts, ct);
@@ -671,11 +723,11 @@ public sealed class BotWorker(
         }
     }
 
-    private async Task<HttpStatusCode?> ApiGetStatusAsync(string botToken, string path, CancellationToken ct)
+    private async Task<HttpStatusCode?> ApiGetStatusAsync(string apiKey, string path, CancellationToken ct)
     {
         try
         {
-            var api = ApiClient(botToken);
+            var api = ApiClient(apiKey);
             using var resp = await api.GetAsync(path, ct);
             return resp.StatusCode;
         }
@@ -687,11 +739,11 @@ public sealed class BotWorker(
     }
 
     private async Task<(bool Ok, string Error, JsonElement? Data)> ApiPostAsync(
-        string botToken, string path, object body, CancellationToken ct)
+        string apiKey, string path, object body, CancellationToken ct)
     {
         try
         {
-            var api = ApiClient(botToken);
+            var api = ApiClient(apiKey);
             using var resp = await api.PostAsJsonAsync(path, body, ct);
             var raw = await resp.Content.ReadAsStringAsync(ct);
             JsonElement? data = null;
@@ -707,12 +759,12 @@ public sealed class BotWorker(
 
             if (resp.IsSuccessStatusCode)
                 return (true, "", data);
-            return (false, message ?? $"HTTP {(int)resp.StatusCode}", data);
+            return (false, "api_error", data);
         }
         catch (Exception ex)
         {
             logger.LogWarning(ex, "[{At}] API POST {Path} failed", Now(), path);
-            return (false, "нет связи с сервером API (проверьте, что Barber.Api запущен или задайте API_BASE_URL)", null);
+            return (false, "unreachable", null);
         }
     }
 
@@ -758,9 +810,18 @@ public sealed class BotWorker(
 
     private static string? ResolveBotToken(IConfiguration config) =>
         FirstNonEmpty(
-            config["TelegramBot:Token"], config["Telegram:BotToken"], config["TELEGRAM_BOT_TOKEN"],
+            config["TelegramBot:Token"],
+            config["Telegram:BotToken"],
+            config["TELEGRAM_BOT_TOKEN"],
             Environment.GetEnvironmentVariable("TELEGRAM_BOT_TOKEN"),
             Environment.GetEnvironmentVariable("Telegram__BotToken"));
+
+    private static string? ResolveApiKey(IConfiguration config) =>
+        FirstNonEmpty(
+            config["Bot:ApiKey"],
+            config["BOT_API_KEY"],
+            Environment.GetEnvironmentVariable("BOT_API_KEY"),
+            Environment.GetEnvironmentVariable("Bot__ApiKey"));
 
     private static string? ResolveProxyUrl(IConfiguration config) =>
         FirstNonEmpty(

@@ -27,7 +27,7 @@ public class TelegramController(
     public async Task<IActionResult> EnsureClient([FromBody] EnsureClientDto dto, CancellationToken ct)
     {
         if (!IsBotAuthorized())
-            return Unauthorized(new { message = "Неверный токен бота" });
+            return Unauthorized(new { message = "Неверный ключ бота" });
 
         if (string.IsNullOrWhiteSpace(dto.Phone) || dto.ChatId == 0)
             return BadRequest(new { message = "Нужны phone и chatId" });
@@ -247,13 +247,48 @@ public class TelegramController(
         });
     }
 
+    /// <summary>Pending outbound messages for the bot to deliver via Telegram.</summary>
+    [HttpGet("outbox")]
+    public async Task<IActionResult> OutboxPending([FromQuery] int take = 20, CancellationToken ct = default)
+    {
+        if (!IsBotAuthorized()) return Unauthorized();
+        take = Math.Clamp(take, 1, 100);
+        var items = await db.TelegramOutbox.AsNoTracking()
+            .Where(x => x.SentAtUtc == null)
+            .OrderBy(x => x.CreatedAtUtc)
+            .Take(take)
+            .Select(x => new { x.Id, x.ChatId, x.Text, x.CreatedAtUtc })
+            .ToListAsync(ct);
+        return Ok(items);
+    }
+
+    [HttpPost("outbox/{id:guid}/ack")]
+    public async Task<IActionResult> OutboxAck(Guid id, CancellationToken ct)
+    {
+        if (!IsBotAuthorized()) return Unauthorized();
+        var row = await db.TelegramOutbox.FirstOrDefaultAsync(x => x.Id == id, ct);
+        if (row is null) return NotFound();
+        if (row.SentAtUtc is null)
+            row.SentAtUtc = DateTime.UtcNow;
+        await db.SaveChangesAsync(ct);
+        return Ok(new { acked = true });
+    }
+
+    /// <summary>Shared secret between API and Telegram bot process (not the BotFather token).</summary>
     private bool IsBotAuthorized()
     {
-        var expected = config["Telegram:BotToken"];
+        var expected = FirstNonEmpty(
+            config["Bot:ApiKey"],
+            config["BOT_API_KEY"],
+            Environment.GetEnvironmentVariable("BOT_API_KEY"),
+            Environment.GetEnvironmentVariable("Bot__ApiKey"));
         if (string.IsNullOrWhiteSpace(expected))
             return false;
-        if (!Request.Headers.TryGetValue("X-Telegram-Bot-Token", out var provided))
+        if (!Request.Headers.TryGetValue("X-Bot-Api-Key", out var provided))
             return false;
         return string.Equals(provided.ToString(), expected, StringComparison.Ordinal);
     }
+
+    private static string? FirstNonEmpty(params string?[] values) =>
+        values.FirstOrDefault(v => !string.IsNullOrWhiteSpace(v));
 }

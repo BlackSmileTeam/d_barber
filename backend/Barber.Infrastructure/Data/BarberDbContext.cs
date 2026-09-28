@@ -19,6 +19,7 @@ public class BarberDbContext : DbContext
     public DbSet<NewsPost> NewsPosts => Set<NewsPost>();
     public DbSet<SalonSettings> SalonSettings => Set<SalonSettings>();
     public DbSet<NotificationTemplate> NotificationTemplates => Set<NotificationTemplate>();
+    public DbSet<TelegramOutboxMessage> TelegramOutbox => Set<TelegramOutboxMessage>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -67,6 +68,13 @@ public class BarberDbContext : DbContext
         modelBuilder.Entity<PortfolioItem>(e =>
         {
             e.Property(x => x.DisplayPrice).HasPrecision(10, 2);
+        });
+
+        modelBuilder.Entity<TelegramOutboxMessage>(e =>
+        {
+            e.ToTable("TelegramOutbox");
+            e.HasIndex(x => x.SentAtUtc);
+            e.HasIndex(x => x.CreatedAtUtc);
         });
     }
 }

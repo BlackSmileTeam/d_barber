@@ -53,28 +53,29 @@ SHOW GRANTS FOR 'dbarber_app'@'%';
 
 После правок MySQL и/или секрета — снова **Actions → Deploy** (без ручного `docker run` на проде).
 
-## Telegram (repository) — нужны для бота и уведомлений
+## Telegram (repository)
 
 Полная инструкция: [TELEGRAM.md](TELEGRAM.md).
 
 | Name | Как получить |
 |------|----------------|
-| `TELEGRAM_BOT_TOKEN` | [@BotFather](https://t.me/BotFather) → `/newbot` → скопировать токен |
-| `TELEGRAM_ADMIN_CHAT_ID` | Написать боту `/chatid` → скопировать число |
-| `TELEGRAM_PROXY_URL` | **Опционально**, но на Selectel/РФ часто **обязательно**: HTTP-прокси до `api.telegram.org`, например `http://user:pass@host:port` |
+| `TELEGRAM_BOT_TOKEN` | [@BotFather](https://t.me/BotFather) → `/newbot` → только для контейнера **бота** |
+| `TELEGRAM_ADMIN_CHAT_ID` | chat id админа (бот `/chatid`) — куда слать уведомления о записях |
+| `BOT_API_KEY` | случайная строка ≥ 24 символов — общий секрет API↔бот (не токен BotFather) |
+| `TELEGRAM_PROXY_URL` | опционально, если с сервера не открывается `api.telegram.org` |
 
 Куда вставить:
 
-1. Открыть https://github.com/BlackSmileTeam/d_barber/settings/secrets/actions  
-2. **New repository secret** → имя `TELEGRAM_BOT_TOKEN` → Value = токен → **Add secret**  
-3. **New repository secret** → имя `TELEGRAM_ADMIN_CHAT_ID` → Value = chat id → **Add secret**  
-4. Если `curl https://api.telegram.org` с сервера **висит/таймаут** — добавьте `TELEGRAM_PROXY_URL`  
-5. **Actions** → **Deploy production** → **Run workflow**
+1. https://github.com/BlackSmileTeam/d_barber/settings/secrets/actions  
+2. Создайте секреты из таблицы выше  
+3. **Actions** → **Deploy production** → **Run workflow**
 
-Что делают секреты при деплое:
+Архитектура:
 
-- API: `Telegram__BotToken`, `Telegram__AdminChatId`, `Telegram__ProxyUrl` — исходящие сообщения (запись, напоминания, админ).
-- Контейнер `dbarber-telegram-bot`: тот же токен + прокси + `Api__BaseUrl=http://dbarber-backend:44315/api` — приём `/start`, привязка телефона.
+- **Бот** единственный говорит с Telegram (polling + отправка из outbox).
+- **API** не хранит токен BotFather; исходящие сообщения кладёт в `TelegramOutbox`, бот их забирает.
+- На проде бот ходит в API по Docker: `http://dbarber-backend:44315/api` (тот же backend, что у сайта).
+- Локально бот по умолчанию: `http://139.100.225.234:55332/api` + тот же `BOT_API_KEY`, что на сервере.
 
 ## Опциональные (repository)
 

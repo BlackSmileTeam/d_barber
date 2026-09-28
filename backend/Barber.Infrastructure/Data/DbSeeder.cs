@@ -296,5 +296,35 @@ public static class DbSeeder
                 // Column already exists.
             }
         }
+
+        var createOutbox = isMysql
+            ? """
+              CREATE TABLE IF NOT EXISTS TelegramOutbox (
+                Id CHAR(36) NOT NULL PRIMARY KEY,
+                ChatId BIGINT NOT NULL,
+                Text LONGTEXT NOT NULL,
+                CreatedAtUtc DATETIME(6) NOT NULL,
+                SentAtUtc DATETIME(6) NULL,
+                INDEX IX_TelegramOutbox_SentAtUtc (SentAtUtc),
+                INDEX IX_TelegramOutbox_CreatedAtUtc (CreatedAtUtc)
+              )
+              """
+            : """
+              CREATE TABLE IF NOT EXISTS TelegramOutbox (
+                Id TEXT NOT NULL PRIMARY KEY,
+                ChatId INTEGER NOT NULL,
+                Text TEXT NOT NULL,
+                CreatedAtUtc TEXT NOT NULL,
+                SentAtUtc TEXT NULL
+              )
+              """;
+        try
+        {
+            await db.Database.ExecuteSqlRawAsync(createOutbox);
+        }
+        catch
+        {
+            // Table already exists / provider difference.
+        }
     }
 }

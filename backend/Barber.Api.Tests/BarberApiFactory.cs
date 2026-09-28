@@ -9,7 +9,7 @@ namespace Barber.Api.Tests;
 
 public class BarberApiFactory : WebApplicationFactory<Program>
 {
-    public const string TestBotToken = "test-bot-token-for-api-tests";
+    public const string TestBotApiKey = "test-bot-api-key";
 
     private readonly string _dbName = $"dbarber-tests-{Guid.NewGuid():N}";
 
@@ -20,7 +20,7 @@ public class BarberApiFactory : WebApplicationFactory<Program>
         {
             config.AddInMemoryCollection(new Dictionary<string, string?>
             {
-                ["Telegram:BotToken"] = TestBotToken,
+                ["Bot:ApiKey"] = TestBotApiKey,
                 ["Telegram:AdminChatId"] = "1"
             });
         });
