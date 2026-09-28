@@ -275,6 +275,12 @@ public sealed class BotWorker(
                 return;
             }
 
+            if (IsMainAction(text, "📍 Как добраться", "Как добраться"))
+            {
+                await ShowHowToGetAsync(bot, chatId, apiKey, ct);
+                return;
+            }
+
             var phone = ExtractPhone(text);
             if (phone is not null && (session.Mode is BotMode.Idle or BotMode.NeedPhone))
             {
@@ -650,9 +656,92 @@ public sealed class BotWorker(
     private static string FailMsg(string? err) =>
         err == "unreachable" ? MsgSiteUnavailable : MsgGenericFail;
 
+    private async Task ShowHowToGetAsync(ITelegramBotClient bot, long chatId, string apiKey, CancellationToken ct)
+    {
+        var salon = await ApiGetAsync<SalonPayload>(apiKey, "salon", ct);
+        if (salon is null || string.IsNullOrWhiteSpace(salon.Address))
+        {
+            await bot.SendTextMessageAsync(chatId, MsgSiteUnavailable, replyMarkup: MainMenu(), cancellationToken: ct);
+            return;
+        }
+
+        var title = string.IsNullOrWhiteSpace(salon.SalonName) ? "D_Barber" : salon.SalonName.Trim();
+        var address = salon.Address.Trim();
+        var encoded = Uri.EscapeDataString(address);
+        var mapUrl = $"https://yandex.ru/maps/?text={encoded}";
+        var routeUrl = $"https://yandex.ru/maps/?rtext=~{encoded}&rtt=auto";
+
+        if (TryParseCoord(salon.MapLat, out var lat) && TryParseCoord(salon.MapLon, out var lon))
+        {
+            try
+            {
+                await bot.SendVenueAsync(
+                    chatId,
+                    latitude: lat,
+                    longitude: lon,
+                    title: title,
+                    address: address,
+                    cancellationToken: ct);
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "[{At}] SendVenue failed for chat {ChatId}", Now(), chatId);
+            }
+        }
+
+        var lines = new List<string>
+        {
+            $"📍 <b>{Html(title)}</b>",
+            Html(address)
+        };
+        if (!string.IsNullOrWhiteSpace(salon.City))
+            lines.Add($"🏙 {Html(salon.City.Trim())}");
+        if (!string.IsNullOrWhiteSpace(salon.Phone))
+            lines.Add($"📞 {Html(salon.Phone.Trim())}");
+
+        var keyboard = new InlineKeyboardMarkup(new[]
+        {
+            new[]
+            {
+                InlineKeyboardButton.WithUrl("🗺 Открыть карту", mapUrl),
+                InlineKeyboardButton.WithUrl("🚗 Маршрут", routeUrl)
+            }
+        });
+
+        await bot.SendTextMessageAsync(
+            chatId,
+            string.Join("\n", lines),
+            parseMode: ParseMode.Html,
+            replyMarkup: keyboard,
+            cancellationToken: ct);
+
+        await bot.SendTextMessageAsync(chatId, "🏠 Главное меню", replyMarkup: MainMenu(), cancellationToken: ct);
+    }
+
+    private static bool TryParseCoord(string? value, out double coord)
+    {
+        coord = 0;
+        if (string.IsNullOrWhiteSpace(value)) return false;
+        return double.TryParse(value.Trim().Replace(',', '.'), NumberStyles.Float, CultureInfo.InvariantCulture, out coord);
+    }
+
+    private static string Html(string text) =>
+        text.Replace("&", "&amp;", StringComparison.Ordinal)
+            .Replace("<", "&lt;", StringComparison.Ordinal)
+            .Replace(">", "&gt;", StringComparison.Ordinal);
+
+    private sealed record SalonPayload(
+        string? Address,
+        string? City,
+        string? Phone,
+        string? MapLat,
+        string? MapLon,
+        string? SalonName);
+
     private static ReplyKeyboardMarkup MainMenu() => new(new[]
     {
-        new[] { new KeyboardButton("✂️ Записаться"), new KeyboardButton("📅 Мои записи") }
+        new[] { new KeyboardButton("✂️ Записаться"), new KeyboardButton("📅 Мои записи") },
+        new[] { new KeyboardButton("📍 Как добраться") }
     })
     { ResizeKeyboard = true };
 
