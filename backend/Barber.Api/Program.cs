@@ -10,6 +10,9 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Configuration.AddUserSecrets(typeof(Program).Assembly, optional: true);
 builder.Configuration.AddEnvironmentVariables();
 
+builder.Logging.AddFilter("Microsoft.EntityFrameworkCore.Database.Command", LogLevel.Warning);
+builder.Logging.AddFilter("Microsoft.EntityFrameworkCore.Database", LogLevel.Warning);
+
 builder.Services.AddInfrastructure(builder.Configuration);
 builder.Services.AddHostedService<ReminderHostedService>();
 builder.Services.AddControllers()
@@ -93,6 +96,28 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseCors("frontend");
+app.Use(async (ctx, next) =>
+{
+    var started = DateTime.UtcNow;
+    await next();
+    var logger = ctx.RequestServices.GetRequiredService<ILoggerFactory>().CreateLogger("Http.Summary");
+    var elapsedMs = (DateTime.UtcNow - started).TotalMilliseconds;
+    var path = ctx.Request.Path.Value ?? "/";
+    var query = ctx.Request.QueryString.HasValue ? ctx.Request.QueryString.Value : "";
+    var user = ctx.User?.Identity?.IsAuthenticated == true
+        ? (ctx.User.Identity?.Name ?? ctx.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "auth")
+        : "anon";
+    // Skip noisy static/uploads; keep API request summaries.
+    if (path.StartsWith("/uploads", StringComparison.OrdinalIgnoreCase)
+        || path.StartsWith("/swagger", StringComparison.OrdinalIgnoreCase))
+        return;
+    var level = ctx.Response.StatusCode >= 500 ? LogLevel.Error
+        : ctx.Response.StatusCode >= 400 ? LogLevel.Warning
+        : LogLevel.Information;
+    logger.Log(level,
+        "HTTP {Method} {Path}{Query} → {Status} ({Elapsed:0} ms) user={User}",
+        ctx.Request.Method, path, query, ctx.Response.StatusCode, elapsedMs, user);
+});
 app.UseStaticFiles();
 app.UseAuthentication();
 app.UseAuthorization();

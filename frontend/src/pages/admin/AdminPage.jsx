@@ -93,8 +93,17 @@ function SectionToolbar({ title, onCreate, createLabel = 'Создать' }) {
   );
 }
 
+const TgIcon = () => (
+  <svg className="admin-tg-icon" width="14" height="14" viewBox="0 0 24 24" aria-hidden="true">
+    <path
+      fill="currentColor"
+      d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm4.64 6.8-1.55 7.3c-.12.53-.43.66-.87.41l-2.4-1.77-1.16 1.12c-.13.13-.24.24-.49.24l.17-2.43 4.45-4.02c.19-.17-.04-.27-.3-.1l-5.5 3.46-2.37-.74c-.51-.16-.52-.51.11-.76l9.27-3.57c.43-.16.8.1.64.66z"
+    />
+  </svg>
+);
+
 export default function AdminPage() {
-  const { auth } = useAuth();
+  const { auth, logout } = useAuth();
   const [appointments, setAppointments] = useState([]);
   const [stats, setStats] = useState(null);
   const [services, setServices] = useState([]);
@@ -510,21 +519,64 @@ export default function AdminPage() {
     });
   }, [appointments, filterDateFrom, filterDateTo, filterClient, filterService, filterStatus]);
 
+  const monthChart = useMemo(() => {
+    if (!stats) return [];
+    const rows = [
+      {
+        key: 'prev',
+        label: stats.previousMonth?.label || 'Прошлый',
+        count: stats.previousMonth?.count ?? 0,
+        sum: Number(stats.previousMonth?.sum || 0),
+      },
+      {
+        key: 'cur',
+        label: stats.currentMonth?.label || 'Текущий',
+        count: stats.currentMonth?.count ?? 0,
+        sum: Number(stats.currentMonth?.sum || 0),
+      },
+    ];
+    const maxCount = Math.max(1, ...rows.map((r) => r.count));
+    const maxSum = Math.max(1, ...rows.map((r) => r.sum));
+    return rows.map((r) => ({
+      ...r,
+      countPct: Math.round((r.count / maxCount) * 100),
+      sumPct: Math.round((r.sum / maxSum) * 100),
+    }));
+  }, [stats]);
+
   const statusBars = useMemo(() => {
     const rows = stats?.byStatus || [];
-    const max = Math.max(1, ...rows.map((r) => r.count || 0));
+    const total = Math.max(1, rows.reduce((s, r) => s + (r.count || 0), 0));
     return rows
       .map((r) => ({
         key: r.status,
         label: statusLabel(r.status),
         count: r.count || 0,
-        pct: Math.round(((r.count || 0) / max) * 100),
+        pct: Math.round(((r.count || 0) / total) * 100),
         cls: statusClass(r.status),
       }))
+      .filter((b) => b.count > 0)
       .sort((a, b) => b.count - a.count);
   }, [stats]);
 
   const money = (n) => `${Number(n || 0).toLocaleString('ru-RU')} ₽`;
+
+  const appointmentActions = (a) => {
+    const items = [];
+    if (a.status !== 'Completed' && a.status !== 'Cancelled' && a.status !== 'NoShow') {
+      items.push({ key: 'Completed', label: 'Выполнено', danger: false, run: () => setAppointmentStatus(a, 'Completed') });
+    }
+    if (a.status !== 'Cancelled' && a.status !== 'NoShow' && a.status !== 'Completed') {
+      items.push({ key: 'Rescheduled', label: 'Перенесено', danger: false, run: () => openReschedule(a) });
+    }
+    if (a.status !== 'Cancelled') {
+      items.push({ key: 'Cancelled', label: 'Отменено', danger: true, run: () => setAppointmentStatus(a, 'Cancelled') });
+    }
+    if (a.status !== 'NoShow' && a.status !== 'Completed' && a.status !== 'Cancelled') {
+      items.push({ key: 'NoShow', label: 'Не пришёл', danger: false, run: () => setAppointmentStatus(a, 'NoShow') });
+    }
+    return items;
+  };
 
   const setAppointmentStatus = async (appt, status, startAtUtc) => {
     setStatusBusy(appt.id);
@@ -727,52 +779,63 @@ export default function AdminPage() {
         <Link to="/">На сайт</Link>
       </aside>
       <main className="admin-main">
+        <div className="admin-topbar">
+          <button type="button" className="btn btn-logout" onClick={logout}>Выйти</button>
+        </div>
         {loadFailed && <p className="empty-block">Данные отсутствуют</p>}
 
         {!loadFailed && stats && (
-          <div className="admin-metrics">
-            <div className="admin-metric">
-              <span className="admin-metric-label">Сегодня</span>
-              <strong>{stats.todayConfirmed}</strong>
-              <span className="admin-metric-sub">подтверждено</span>
+          <div className="admin-infographic panel">
+            <div className="admin-chart-head">
+              <strong>Показатели</strong>
+              <span className="admin-chart-today">Сегодня: {stats.todayConfirmed} подтв.</span>
             </div>
-            <div className="admin-metric">
-              <span className="admin-metric-label">{stats.currentMonth?.label || 'Текущий месяц'}</span>
-              <strong>{stats.currentMonth?.count ?? 0}</strong>
-              <span className="admin-metric-sub">{money(stats.currentMonth?.sum)} · записи</span>
+            <div className="admin-chart-months">
+              {monthChart.map((m) => (
+                <div key={m.key} className="admin-chart-month">
+                  <div className="admin-chart-month-meta">
+                    <span className="admin-chart-month-label">{m.label}</span>
+                    <span className="admin-chart-month-vals">{m.count} · {money(m.sum)}</span>
+                  </div>
+                  <div className="admin-chart-tracks">
+                    <div className="admin-bar-track" title="Записи">
+                      <div className="admin-bar-fill" style={{ width: `${m.countPct}%` }} />
+                    </div>
+                    <div className="admin-bar-track admin-bar-track-sum" title="Сумма">
+                      <div className="admin-bar-fill completed" style={{ width: `${m.sumPct}%` }} />
+                    </div>
+                  </div>
+                </div>
+              ))}
             </div>
-            <div className="admin-metric">
-              <span className="admin-metric-label">{stats.previousMonth?.label || 'Прошлый месяц'}</span>
-              <strong>{stats.previousMonth?.count ?? 0}</strong>
-              <span className="admin-metric-sub">{money(stats.previousMonth?.sum)} · записи</span>
-            </div>
-            <div className="admin-metric">
-              <span className="admin-metric-label">Отмены / неявки</span>
-              <strong>{(stats.cancelledTotal || 0) + (stats.noShowTotal || 0)}</strong>
-              <span className="admin-metric-sub">отмен: {stats.cancelledTotal || 0} · неявок: {stats.noShowTotal || 0}</span>
+            {statusBars.length > 0 && (
+              <div className="admin-chart-status" title="Статусы">
+                {statusBars.map((b) => (
+                  <span
+                    key={b.key}
+                    className={`admin-chart-seg ${b.cls}`}
+                    style={{ flexGrow: b.count, flexBasis: 0 }}
+                    title={`${b.label}: ${b.count}`}
+                  />
+                ))}
+              </div>
+            )}
+            <div className="admin-chart-legend">
+              {statusBars.map((b) => (
+                <span key={b.key} className="admin-chart-legend-item">
+                  <i className={`admin-chart-dot ${b.cls}`} />
+                  {b.label} {b.count}
+                </span>
+              ))}
+              <span className="admin-chart-legend-item muted">
+                отмены/неявки: {(stats.cancelledTotal || 0) + (stats.noShowTotal || 0)}
+              </span>
             </div>
           </div>
         )}
 
         {!loadFailed && tab === 'appointments' && (
           <>
-            {statusBars.length > 0 && (
-              <div className="admin-infographic panel">
-                <strong className="admin-card-title">Статусы записей</strong>
-                <div className="admin-bars">
-                  {statusBars.map((b) => (
-                    <div key={b.key} className="admin-bar-row">
-                      <span className="admin-bar-label">{b.label}</span>
-                      <div className="admin-bar-track">
-                        <div className={`admin-bar-fill ${b.cls}`} style={{ width: `${b.pct}%` }} />
-                      </div>
-                      <span className="admin-bar-count">{b.count}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
             <div className="admin-filters panel">
               <label>
                 С даты
@@ -811,7 +874,7 @@ export default function AdminPage() {
               {(filterDateFrom || filterDateTo || filterClient || filterService || filterStatus) && (
                 <button
                   type="button"
-                  className="btn btn-ghost"
+                  className="btn btn-ghost btn-xs"
                   onClick={() => {
                     setFilterDateFrom('');
                     setFilterDateTo('');
@@ -891,20 +954,33 @@ export default function AdminPage() {
                       </td>
                       <td><span className={`badge ${statusClass(a.status)}`}>{statusLabel(a.status)}</span></td>
                       <td>
-                        <div className="admin-appt-actions">
-                          {a.status !== 'Completed' && a.status !== 'Cancelled' && a.status !== 'NoShow' && (
-                            <button type="button" className="btn btn-ghost btn-xs" disabled={statusBusy === a.id} onClick={() => setAppointmentStatus(a, 'Completed')}>Выполнено</button>
-                          )}
-                          {a.status !== 'Cancelled' && a.status !== 'NoShow' && a.status !== 'Completed' && (
-                            <button type="button" className="btn btn-ghost btn-xs" disabled={statusBusy === a.id} onClick={() => openReschedule(a)}>Перенесено</button>
-                          )}
-                          {a.status !== 'Cancelled' && (
-                            <button type="button" className="btn btn-danger btn-xs" disabled={statusBusy === a.id} onClick={() => setAppointmentStatus(a, 'Cancelled')}>Отменено</button>
-                          )}
-                          {a.status !== 'NoShow' && a.status !== 'Completed' && a.status !== 'Cancelled' && (
-                            <button type="button" className="btn btn-ghost btn-xs" disabled={statusBusy === a.id} onClick={() => setAppointmentStatus(a, 'NoShow')}>Не пришёл</button>
-                          )}
-                        </div>
+                        {(() => {
+                          const actions = appointmentActions(a);
+                          if (actions.length === 0) return <span className="admin-key">—</span>;
+                          return (
+                            <details className="admin-actions-menu">
+                              <summary className="btn btn-ghost btn-xs" disabled={statusBusy === a.id}>
+                                Действия
+                              </summary>
+                              <div className="admin-actions-dropdown">
+                                {actions.map((item) => (
+                                  <button
+                                    key={item.key}
+                                    type="button"
+                                    className={`admin-actions-item${item.danger ? ' danger' : ''}`}
+                                    disabled={statusBusy === a.id}
+                                    onClick={(e) => {
+                                      e.currentTarget.closest('details')?.removeAttribute('open');
+                                      item.run();
+                                    }}
+                                  >
+                                    {item.label}
+                                  </button>
+                                ))}
+                              </div>
+                            </details>
+                          );
+                        })()}
                       </td>
                     </tr>
                   ))}
@@ -945,7 +1021,11 @@ export default function AdminPage() {
                       <div className="admin-client-line">
                         <strong>{c.name}</strong>
                         <span className="admin-key">{c.phone}</span>
-                        {c.telegramLinked && <span className="badge confirmed">TG</span>}
+                        {c.telegramLinked && (
+                          <span className="admin-tg-badge" title="Telegram привязан" aria-label="Telegram привязан">
+                            <TgIcon />
+                          </span>
+                        )}
                       </div>
                       <p className="admin-client-meta">
                         {new Date(c.createdAtUtc).toLocaleDateString('ru-RU')}
@@ -961,11 +1041,11 @@ export default function AdminPage() {
                         onChange={(e) => setResetDrafts((prev) => ({ ...prev, [c.id]: e.target.value }))}
                         placeholder="Новый пароль"
                       />
-                      <button type="button" className="btn btn-ghost btn-xs" onClick={() => resetPassword(c, false)} disabled={!(resetDrafts[c.id] || '').trim()}>
-                        Задать
-                      </button>
                       <button type="button" className="btn btn-ghost btn-xs" onClick={() => resetPassword(c, true)}>
-                        Сген.
+                        Генерация
+                      </button>
+                      <button type="button" className="btn btn-ghost btn-xs" onClick={() => resetPassword(c, false)} disabled={!(resetDrafts[c.id] || '').trim()}>
+                        Сохранить
                       </button>
                     </div>
                   </div>

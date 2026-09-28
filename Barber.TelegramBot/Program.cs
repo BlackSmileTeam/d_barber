@@ -53,6 +53,7 @@ internal sealed class BotSession
     public Guid? AppointmentId { get; set; }
     public List<(string Label, DateTime Utc)> Slots { get; set; } = [];
     public List<(Guid Id, string Label)> Appointments { get; set; } = [];
+    public Dictionary<Guid, Guid> AppointmentServiceIds { get; set; } = new();
 }
 
 public sealed class BotSessionStore
@@ -240,7 +241,7 @@ public sealed class BotWorker(
             if (text.StartsWith("/start", StringComparison.OrdinalIgnoreCase))
             {
                 sessions.Reset(chatId);
-                await HandleStartAsync(bot, chatId, apiKey, ct);
+                await HandleStartAsync(bot, chatId, DisplayName(message.From), apiKey, ct);
                 return;
             }
 
@@ -259,7 +260,11 @@ public sealed class BotWorker(
                 || text.Equals("❌ Отмена", StringComparison.OrdinalIgnoreCase))
             {
                 sessions.Reset(chatId);
-                await bot.SendTextMessageAsync(chatId, "🏠 Главное меню", replyMarkup: MainMenu(), cancellationToken: ct);
+                await bot.SendTextMessageAsync(chatId,
+                    BuildReturningGreeting(DisplayName(message.From)),
+                    parseMode: ParseMode.Html,
+                    replyMarkup: MainMenu(),
+                    cancellationToken: ct);
                 return;
             }
 
@@ -336,10 +341,12 @@ public sealed class BotWorker(
         {
             await bot.AnswerCallbackQueryAsync(callback.Id, cancellationToken: ct);
 
-            if (data.StartsWith("cancel:", StringComparison.Ordinal))
+            if (data.StartsWith("c:", StringComparison.Ordinal) || data.StartsWith("cancel:", StringComparison.Ordinal))
             {
-                var idText = data["cancel:".Length..];
-                if (!Guid.TryParse(idText, out var apptId))
+                var idText = data.StartsWith("c:", StringComparison.Ordinal)
+                    ? data["c:".Length..]
+                    : data["cancel:".Length..];
+                if (!TryParseGuidFlexible(idText, out var apptId))
                 {
                     await bot.SendTextMessageAsync(chatId, "⚠️ Некорректная запись.", replyMarkup: MainMenu(), cancellationToken: ct);
                     return;
@@ -354,15 +361,39 @@ public sealed class BotWorker(
                 return;
             }
 
-            if (data.StartsWith("reschedule:", StringComparison.Ordinal))
+            if (data.StartsWith("r:", StringComparison.Ordinal) || data.StartsWith("reschedule:", StringComparison.Ordinal))
             {
-                var parts = data.Split(':');
-                if (parts.Length < 3
-                    || !Guid.TryParse(parts[1], out var apptId)
-                    || !Guid.TryParse(parts[2], out var serviceId))
+                Guid apptId;
+                Guid serviceId;
+                if (data.StartsWith("r:", StringComparison.Ordinal))
                 {
-                    await bot.SendTextMessageAsync(chatId, "⚠️ Некорректная запись.", replyMarkup: MainMenu(), cancellationToken: ct);
-                    return;
+                    if (!TryParseGuidFlexible(data["r:".Length..], out apptId))
+                    {
+                        await bot.SendTextMessageAsync(chatId, "⚠️ Некорректная запись.", replyMarkup: MainMenu(), cancellationToken: ct);
+                        return;
+                    }
+
+                    var sessionLookup = sessions.Get(chatId);
+                    if (!sessionLookup.AppointmentServiceIds.TryGetValue(apptId, out serviceId))
+                    {
+                        logger.LogWarning("[{At}] Reschedule missing serviceId for appointment {Id}", Now(), apptId);
+                        await bot.SendTextMessageAsync(chatId,
+                            "⚠️ Не удалось найти услугу для переноса. Откройте «Мои записи» ещё раз.",
+                            replyMarkup: MainMenu(),
+                            cancellationToken: ct);
+                        return;
+                    }
+                }
+                else
+                {
+                    var parts = data.Split(':');
+                    if (parts.Length < 3
+                        || !Guid.TryParse(parts[1], out apptId)
+                        || !Guid.TryParse(parts[2], out serviceId))
+                    {
+                        await bot.SendTextMessageAsync(chatId, "⚠️ Некорректная запись.", replyMarkup: MainMenu(), cancellationToken: ct);
+                        return;
+                    }
                 }
 
                 var session = sessions.Get(chatId);
@@ -383,7 +414,14 @@ public sealed class BotWorker(
     {
         if (!await EnsureLinkedAsync(bot, chatId, apiKey, ct)) return;
         var services = await ApiGetAsync<List<JsonElement>>(apiKey, "telegram/services", ct);
-        if (services is null || services.Count == 0)
+        if (services is null)
+        {
+            logger.LogWarning("[{At}] telegram/services returned null for chat {ChatId}", Now(), chatId);
+            await bot.SendTextMessageAsync(chatId, MsgGenericFail, replyMarkup: MainMenu(), cancellationToken: ct);
+            return;
+        }
+
+        if (services.Count == 0)
         {
             await bot.SendTextMessageAsync(chatId, "😔 Пока нет доступных услуг.", replyMarkup: MainMenu(), cancellationToken: ct);
             return;
@@ -393,19 +431,18 @@ public sealed class BotWorker(
         session.Mode = BotMode.BookPickService;
         var rows = services.Select(s =>
         {
-            var name = s.GetProperty("name").GetString() ?? "Услуга";
+            var name = ReadServiceName(s);
             var price = s.GetProperty("price").GetDecimal();
-            return new[] { new KeyboardButton($"✂️ {name} — {price:0} ₽") };
+            return new[] { new KeyboardButton(FormatServiceButton(name, price)) };
         }).ToList();
         rows.Add([new KeyboardButton("🏠 Меню")]);
 
-        // stash services in session via labels
         session.Appointments = services.Select(s =>
         {
             var id = s.GetProperty("id").GetGuid();
-            var name = s.GetProperty("name").GetString() ?? "Услуга";
+            var name = ReadServiceName(s);
             var price = s.GetProperty("price").GetDecimal();
-            return (id, $"✂️ {name} — {price:0} ₽");
+            return (id, FormatServiceButton(name, price));
         }).ToList();
 
         await bot.SendTextMessageAsync(chatId,
@@ -426,7 +463,7 @@ public sealed class BotWorker(
         }
 
         session.ServiceId = match.Id;
-        session.ServiceName = match.Label;
+        session.ServiceName = StripLeadingScissors(match.Label.Split('—')[0].Trim());
         session.Mode = BotMode.BookPickDate;
         await bot.SendTextMessageAsync(chatId,
             "📅 Выберите день:",
@@ -479,38 +516,82 @@ public sealed class BotWorker(
     private async Task ShowAppointmentsAsync(ITelegramBotClient bot, long chatId, string apiKey, CancellationToken ct)
     {
         if (!await EnsureLinkedAsync(bot, chatId, apiKey, ct)) return;
-        var items = await ApiGetAsync<List<JsonElement>>(apiKey, $"telegram/appointments?chatId={chatId}", ct);
-        if (items is null || items.Count == 0)
+
+        List<JsonElement>? items;
+        try
+        {
+            items = await ApiGetAsync<List<JsonElement>>(apiKey, $"telegram/appointments?chatId={chatId}", ct);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "[{At}] ShowAppointments API call threw ChatId={ChatId}", Now(), chatId);
+            await bot.SendTextMessageAsync(chatId, MsgGenericFail, replyMarkup: MainMenu(), cancellationToken: ct);
+            return;
+        }
+
+        if (items is null)
+        {
+            logger.LogWarning("[{At}] ShowAppointments got null payload (parse/HTTP) ChatId={ChatId}", Now(), chatId);
+            await bot.SendTextMessageAsync(chatId, MsgGenericFail, replyMarkup: MainMenu(), cancellationToken: ct);
+            return;
+        }
+
+        if (items.Count == 0)
         {
             await bot.SendTextMessageAsync(chatId, "📭 Ближайших записей нет.", replyMarkup: MainMenu(), cancellationToken: ct);
             return;
         }
 
+        var session = sessions.Get(chatId);
+        session.AppointmentServiceIds.Clear();
+
         await bot.SendTextMessageAsync(chatId, "📅 <b>Ваши записи</b>", parseMode: ParseMode.Html, replyMarkup: MainMenu(), cancellationToken: ct);
 
         foreach (var a in items)
         {
-            var id = a.GetProperty("id").GetGuid();
-            var serviceId = a.GetProperty("serviceId").GetGuid();
-            var name = a.GetProperty("serviceName").GetString() ?? "Услуга";
-            var start = a.GetProperty("startAtUtc").GetDateTime();
-            if (start.Kind == DateTimeKind.Unspecified) start = DateTime.SpecifyKind(start, DateTimeKind.Utc);
-            var local = TimeZoneInfo.ConvertTimeFromUtc(start.ToUniversalTime(), Tz);
-
-            var keyboard = new InlineKeyboardMarkup(new[]
+            try
             {
-                new[]
+                if (!TryReadGuid(a, "id", out var id) || !TryReadGuid(a, "serviceId", out var serviceId))
                 {
-                    InlineKeyboardButton.WithCallbackData("❌ Отменить", $"cancel:{id}"),
-                    InlineKeyboardButton.WithCallbackData("🔄 Перенести", $"reschedule:{id}:{serviceId}")
+                    logger.LogWarning("[{At}] Appointment missing id/serviceId: {Json}", Now(), a.GetRawText());
+                    continue;
                 }
-            });
 
-            await bot.SendTextMessageAsync(chatId,
-                $"✂️ <b>{name}</b>\n📅 {local:dd.MM.yyyy} 🕒 {local:HH:mm}",
-                parseMode: ParseMode.Html,
-                replyMarkup: keyboard,
-                cancellationToken: ct);
+                session.AppointmentServiceIds[id] = serviceId;
+                var name = StripLeadingScissors(
+                    (TryReadString(a, "serviceName") ?? TryReadString(a, "ServiceName") ?? "Услуга"));
+
+                if (!TryReadDateTimeUtc(a, "startAtUtc", out var start)
+                    && !TryReadDateTimeUtc(a, "StartAtUtc", out start))
+                {
+                    logger.LogWarning("[{At}] Appointment {Id} bad startAtUtc: {Json}", Now(), id, a.GetRawText());
+                    continue;
+                }
+
+                var local = TimeZoneInfo.ConvertTimeFromUtc(start, Tz);
+                // callback_data max 64 bytes — use compact "N" guids (32 chars)
+                var keyboard = new InlineKeyboardMarkup(new[]
+                {
+                    new[]
+                    {
+                        InlineKeyboardButton.WithCallbackData("❌ Отменить", $"c:{id:N}"),
+                        InlineKeyboardButton.WithCallbackData("🔄 Перенести", $"r:{id:N}")
+                    }
+                });
+
+                await bot.SendTextMessageAsync(chatId,
+                    $"✂️ <b>{Html(name)}</b>\n📅 {local:dd.MM.yyyy} 🕒 {local:HH:mm}",
+                    parseMode: ParseMode.Html,
+                    replyMarkup: keyboard,
+                    cancellationToken: ct);
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "[{At}] ShowAppointments item failed ChatId={ChatId} Json={Json}",
+                    Now(), chatId, a.ValueKind == JsonValueKind.Undefined ? "(n/a)" : a.GetRawText());
+                await bot.SendTextMessageAsync(chatId, MsgGenericFail, replyMarkup: MainMenu(), cancellationToken: ct);
+                return;
+            }
         }
     }
 
@@ -643,7 +724,7 @@ public sealed class BotWorker(
         return true;
     }
 
-    private async Task HandleStartAsync(ITelegramBotClient bot, long chatId, string apiKey, CancellationToken ct)
+    private async Task HandleStartAsync(ITelegramBotClient bot, long chatId, string clientName, string apiKey, CancellationToken ct)
     {
         var status = await ApiGetStatusAsync(apiKey, $"telegram/appointments?chatId={chatId}", ct);
         if (status is null)
@@ -655,8 +736,7 @@ public sealed class BotWorker(
         if (status == HttpStatusCode.OK)
         {
             await bot.SendTextMessageAsync(chatId,
-                "👋 <b>Снова здравствуйте!</b>\n\n"
-                + "Можно записаться, посмотреть визиты или открыть «Как добраться».",
+                BuildReturningGreeting(clientName),
                 parseMode: ParseMode.Html,
                 replyMarkup: MainMenu(),
                 cancellationToken: ct);
@@ -664,14 +744,15 @@ public sealed class BotWorker(
         }
 
         sessions.Get(chatId).Mode = BotMode.NeedPhone;
-        await SendWelcomeAsync(bot, chatId, ct);
+        await SendWelcomeAsync(bot, chatId, clientName, ct);
     }
 
-    private static async Task SendWelcomeAsync(ITelegramBotClient bot, long chatId, CancellationToken ct)
+    private static async Task SendWelcomeAsync(ITelegramBotClient bot, long chatId, string clientName, CancellationToken ct)
     {
+        var name = string.IsNullOrWhiteSpace(clientName) ? "друг" : clientName.Trim();
         await bot.SendTextMessageAsync(chatId,
-            "👋 <b>Добро пожаловать в D_Barber!</b>\n\n"
-            + "Здесь можно записаться на стрижку, посмотреть свои визиты, отменить или перенести запись.\n\n"
+            $"👋 <b>{Html(PickWelcomeGreeting(name))}</b>\n\n"
+            + $"{Html(PickTagline())}\n\n"
             + "Нажмите «Поделиться номером», чтобы начать.",
             parseMode: ParseMode.Html,
             replyMarkup: SharePhoneKeyboard(),
@@ -734,15 +815,11 @@ public sealed class BotWorker(
                 replyMarkup: keyboard,
                 disableWebPagePreview: true,
                 cancellationToken: ct);
-
-            await bot.SendTextMessageAsync(chatId, "🏠 Главное меню", replyMarkup: MainMenu(), cancellationToken: ct);
         }
         catch (Exception ex)
         {
             logger.LogError(ex, "[{At}] ShowHowToGet failed ChatId={ChatId}", Now(), chatId);
             await SafeSend(bot, chatId, "📍 Не удалось показать адрес. Нажмите «Как добраться» ещё раз.", ct);
-            try { await bot.SendTextMessageAsync(chatId, "🏠", replyMarkup: MainMenu(), cancellationToken: ct); }
-            catch { /* ignore */ }
         }
     }
 
@@ -819,6 +896,172 @@ public sealed class BotWorker(
         if (from is null) return "Клиент Telegram";
         var name = $"{from.FirstName} {from.LastName}".Trim();
         return string.IsNullOrWhiteSpace(name) ? (from.Username ?? "Клиент Telegram") : name;
+    }
+
+    private static string BuildReturningGreeting(string clientName)
+    {
+        var name = string.IsNullOrWhiteSpace(clientName) ? "друг" : clientName.Trim();
+        return $"👋 <b>{Html(PickWelcomeGreeting(name))}</b>\n\n{Html(PickTagline())}";
+    }
+
+    private static string PickWelcomeGreeting(string name)
+    {
+        var templates = WelcomeGreetings;
+        var idx = (int)((uint)HashCode.Combine(DateTime.UtcNow.Ticks, name) % (uint)templates.Length);
+        return string.Format(CultureInfo.InvariantCulture, templates[idx], name);
+    }
+
+    private static string PickTagline()
+    {
+        var idx = (int)((DateTime.UtcNow.Ticks / TimeSpan.TicksPerSecond) % Taglines.Length);
+        return Taglines[Math.Abs(idx)];
+    }
+
+    private static readonly string[] WelcomeGreetings =
+    [
+        "{0}, рады видеть вас снова!",
+        "С возвращением, {0}!",
+        "{0}, добрый день — D_Barber на связи.",
+        "Привет, {0}! Заглянули вовремя.",
+        "{0}, давно не виделись — самое время обновить стиль.",
+        "Здравствуйте, {0}! Стул мастера свободен для вас.",
+        "{0}, добро пожаловать обратно в D_Barber.",
+        "О, {0}! Приятно, что вы снова здесь.",
+        "{0}, ваш барбер уже улыбается.",
+        "Хэй, {0}! Готовы к свежему образу?",
+        "{0}, снова на связи — давайте сделаем день лучше.",
+        "Добро пожаловать, {0}! D_Barber к вашим услугам.",
+        "{0}, отличный момент заглянуть за стрижкой.",
+        "Приветствуем вас, {0}!",
+        "{0}, вы в нужном месте — у своего барбера.",
+        "{0}, снова на связи — только по имени, как вы любите.",
+        "{0}, D_Barber рад вашему визиту в чат.",
+        "Йоу, {0}! Время освежить фасон.",
+        "{0}, как настроение? Стрижка поднимет ещё выше.",
+        "Здравствуйте снова, {0}!",
+        "{0}, ваш стиль ждёт апдейта.",
+        "Рады вам, {0} — заходите «виртуально» и записывайтесь.",
+        "{0}, мастер уже наточил ножницы.",
+        "Добрый час, {0}! D_Barber на месте.",
+        "{0}, приятно снова видеть знакомое имя.",
+        "Салют, {0}! Красивая стрижка начинается с записи.",
+        "{0}, вы сделали правильный выбор — D_Barber.",
+        "С возвращением в атмосферу барбершопа, {0}!",
+        "{0}, давайте подберём идеальный слот.",
+        "Привет, {0}! Здесь ценят точность и стиль.",
+        "{0}, ваш следующий вау-эффект — после визита.",
+        "Добро пожаловать домой, {0} — в D_Barber.",
+        "{0}, ножницы готовы, кресло ждёт.",
+        "Эй, {0}! Свежий фейд начинается здесь.",
+        "{0}, спасибо, что выбираете нас снова.",
+        "Здравствуйте, {0}! Качество — наш ритуал.",
+        "{0}, барбер-настроение активировано.",
+        "Снова вы, {0} — и это отличная новость.",
+        "{0}, давайте сделаем образ ещё чище.",
+        "Привет из D_Barber, {0}!",
+        "{0}, здесь стригут с вниманием к деталям.",
+        "Добрый день, {0}! Стиль любит регулярность.",
+        "{0}, ваш персональный вход в D_Barber открыт.",
+        "Рады снова чатиться, {0}!",
+        "{0}, пора освежить контуры.",
+        "Хэй-хэй, {0}! Готовы к премиум-уходу?",
+        "{0}, D_Barber — когда форма важна.",
+        "С возвращением к мастеру, {0}!",
+        "{0}, записывайтесь — лучшие слоты разбирают быстро.",
+        "Здравствуйте, {0}! Пусть следующий визит будет идеальным."
+    ];
+
+    private static readonly string[] Taglines =
+    [
+        "Чистые линии, уверенный силуэт — D_Barber.",
+        "Стрижка, после которой хочется смотреть в зеркало дважды.",
+        "Премиум-уход без лишней суеты — только вы и мастер.",
+        "Форма, которая держится. Стиль, который замечают.",
+        "Острый инструмент, спокойные руки, ваш лучший ракурс.",
+        "Барбершоп, где детали решают всё.",
+        "Свежий фейд, ровная борода, настроение на высоте.",
+        "Не просто стрижка — ритуал уверенности.",
+        "D_Barber: когда хочется выглядеть на все сто.",
+        "Точность ножниц и вкус к деталям — наша визитка."
+    ];
+
+    private static string ReadServiceName(JsonElement s) =>
+        StripLeadingScissors(s.GetProperty("name").GetString() ?? "Услуга");
+
+    private static string FormatServiceButton(string name, decimal price) =>
+        $"✂️ {StripLeadingScissors(name)} — {price:0} ₽";
+
+    private static string StripLeadingScissors(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return "Услуга";
+        var t = text.Trim();
+        // remove repeated leading scissors emoji (API name may already include it)
+        while (true)
+        {
+            if (t.StartsWith("✂️", StringComparison.Ordinal))
+                t = t["✂️".Length..].TrimStart(' ', '\uFE0F');
+            else if (t.StartsWith("✂", StringComparison.Ordinal))
+                t = t["✂".Length..].TrimStart(' ', '\uFE0F');
+            else
+                break;
+        }
+        return string.IsNullOrWhiteSpace(t) ? "Услуга" : t;
+    }
+
+    private static bool TryParseGuidFlexible(string text, out Guid id)
+    {
+        text = text.Trim();
+        if (Guid.TryParse(text, out id)) return true;
+        return Guid.TryParseExact(text, "N", out id);
+    }
+
+    private static bool TryReadGuid(JsonElement el, string name, out Guid id)
+    {
+        id = default;
+        if (!el.TryGetProperty(name, out var p)) return false;
+        if (p.ValueKind == JsonValueKind.String)
+            return Guid.TryParse(p.GetString(), out id);
+        try
+        {
+            id = p.GetGuid();
+            return id != Guid.Empty;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static string? TryReadString(JsonElement el, string name) =>
+        el.TryGetProperty(name, out var p) && p.ValueKind == JsonValueKind.String ? p.GetString() : null;
+
+    private static bool TryReadDateTimeUtc(JsonElement el, string name, out DateTime utc)
+    {
+        utc = default;
+        if (!el.TryGetProperty(name, out var p)) return false;
+        try
+        {
+            if (p.ValueKind == JsonValueKind.String
+                && DateTimeOffset.TryParse(p.GetString(), CultureInfo.InvariantCulture,
+                    DateTimeStyles.RoundtripKind, out var dto))
+            {
+                utc = dto.UtcDateTime;
+                return true;
+            }
+
+            var dt = p.GetDateTime();
+            utc = dt.Kind switch
+            {
+                DateTimeKind.Utc => dt,
+                DateTimeKind.Local => dt.ToUniversalTime(),
+                _ => DateTime.SpecifyKind(dt, DateTimeKind.Utc)
+            };
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     private HttpClient ApiClient(string apiKey)
