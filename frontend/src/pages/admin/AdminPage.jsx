@@ -330,6 +330,17 @@ export default function AdminPage() {
     [appointmentsByDay, selectedDay],
   );
 
+  const statusTableAppointments = useMemo(() => {
+    if (!filterStatus) return [];
+    return [...filteredAppointments].sort(
+      (a, b) => new Date(b.startAtUtc) - new Date(a.startAtUtc),
+    );
+  }, [filteredAppointments, filterStatus]);
+
+  const toggleStatusFilter = (status) => {
+    setFilterStatus((prev) => (prev === status ? '' : status));
+  };
+
   const todayYmd = toLocalYmd(new Date());
 
   if (!auth || auth.role !== 'Admin') {
@@ -954,29 +965,65 @@ export default function AdminPage() {
                     {donutSegments.length === 0 ? (
                       <circle cx="50" cy="50" r="36" fill="none" stroke="var(--line)" strokeWidth="14" />
                     ) : (
-                      donutSegments.map((seg) => (
-                        <circle
-                          key={seg.key}
-                          cx="50"
-                          cy="50"
-                          r="36"
-                          fill="none"
-                          strokeWidth="14"
-                          strokeDasharray={seg.dash}
-                          strokeDashoffset={seg.offset}
-                          transform="rotate(-90 50 50)"
-                          style={{
-                            stroke: seg.cls === 'confirmed' ? 'var(--ok)'
-                              : seg.cls === 'cancelled' || seg.cls === 'noshow' ? 'var(--danger)'
-                                : seg.cls === 'rescheduled' ? 'var(--warn)'
-                                  : 'var(--copper)',
-                          }}
-                        />
-                      ))
+                      donutSegments.map((seg) => {
+                        const active = filterStatus === seg.key;
+                        const dimmed = filterStatus && !active;
+                        return (
+                          <circle
+                            key={seg.key}
+                            className={[
+                              'admin-donut-seg',
+                              active ? 'is-active' : '',
+                              dimmed ? 'is-dimmed' : '',
+                            ].filter(Boolean).join(' ')}
+                            cx="50"
+                            cy="50"
+                            r="36"
+                            fill="none"
+                            strokeWidth={active ? 16 : 14}
+                            strokeDasharray={seg.dash}
+                            strokeDashoffset={seg.offset}
+                            transform="rotate(-90 50 50)"
+                            role="button"
+                            tabIndex={0}
+                            aria-pressed={active}
+                            aria-label={`${seg.label}: ${seg.count}`}
+                            onClick={() => toggleStatusFilter(seg.key)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter' || e.key === ' ') {
+                                e.preventDefault();
+                                toggleStatusFilter(seg.key);
+                              }
+                            }}
+                            style={{
+                              stroke: seg.cls === 'confirmed' ? 'var(--ok)'
+                                : seg.cls === 'cancelled' || seg.cls === 'noshow' ? 'var(--danger)'
+                                  : seg.cls === 'rescheduled' ? 'var(--warn)'
+                                    : 'var(--copper)',
+                            }}
+                          />
+                        );
+                      })
                     )}
-                    <circle className="admin-donut-center" cx="50" cy="50" r="26" />
-                    <text className="admin-donut-value" x="50" y="48">{donutTotal}</text>
-                    <text className="admin-donut-label" x="50" y="62">записей</text>
+                    <circle
+                      className="admin-donut-center"
+                      cx="50"
+                      cy="50"
+                      r="26"
+                      role="button"
+                      tabIndex={0}
+                      aria-label="Сбросить фильтр статуса"
+                      onClick={() => setFilterStatus('')}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          setFilterStatus('');
+                        }
+                      }}
+                      style={{ cursor: filterStatus ? 'pointer' : 'default' }}
+                    />
+                    <text className="admin-donut-value" x="50" y="48" pointerEvents="none">{donutTotal}</text>
+                    <text className="admin-donut-label" x="50" y="62" pointerEvents="none">записей</text>
                   </svg>
                   <div className="admin-donut-side">
                     {monthChart.map((m) => (
@@ -986,18 +1033,127 @@ export default function AdminPage() {
                       </div>
                     ))}
                     <div className="admin-chart-legend">
-                      {statusBars.map((b) => (
-                        <span key={b.key} className="admin-chart-legend-item">
-                          <i className={`admin-chart-dot ${b.cls}`} />
-                          {b.label} {b.count}
-                        </span>
-                      ))}
+                      <button
+                        type="button"
+                        className={`admin-chart-legend-item admin-chart-legend-btn${!filterStatus ? ' is-active' : ''}`}
+                        onClick={() => setFilterStatus('')}
+                      >
+                        Все
+                      </button>
+                      {statusBars.map((b) => {
+                        const active = filterStatus === b.key;
+                        return (
+                          <button
+                            key={b.key}
+                            type="button"
+                            className={[
+                              'admin-chart-legend-item',
+                              'admin-chart-legend-btn',
+                              active ? 'is-active' : '',
+                              filterStatus && !active ? 'is-dimmed' : '',
+                            ].filter(Boolean).join(' ')}
+                            aria-pressed={active}
+                            onClick={() => toggleStatusFilter(b.key)}
+                          >
+                            <i className={`admin-chart-dot ${b.cls}`} />
+                            {b.label} {b.count}
+                          </button>
+                        );
+                      })}
                       <span className="admin-chart-legend-item muted">
                         отмены/неявки: {(stats.cancelledTotal || 0) + (stats.noShowTotal || 0)}
                       </span>
                     </div>
                   </div>
                 </div>
+              </div>
+            )}
+
+            {filterStatus && (
+              <div className="panel admin-status-table">
+                <div className="admin-status-table-head">
+                  <strong className="admin-card-title">
+                    Записи · {statusLabel(filterStatus)}
+                    <span className="admin-status-table-count"> ({statusTableAppointments.length})</span>
+                  </strong>
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-xs"
+                    onClick={() => setFilterStatus('')}
+                  >
+                    Все
+                  </button>
+                </div>
+                {statusTableAppointments.length === 0 ? (
+                  <p className="empty-block" style={{ margin: 0 }}>Нет записей с этим статусом</p>
+                ) : (
+                  <div className="admin-status-table-scroll">
+                    <table className="table">
+                      <thead>
+                        <tr>
+                          <th>Клиент</th>
+                          <th>Услуга</th>
+                          <th>Дата и время</th>
+                          <th>Статус</th>
+                          <th>Действия</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {statusTableAppointments.map((a) => {
+                          const actions = appointmentActions(a);
+                          return (
+                            <tr key={a.id}>
+                              <td>
+                                <strong>{a.clientName}</strong>
+                                <div className="admin-status-table-sub">{a.clientPhone}</div>
+                              </td>
+                              <td>
+                                {a.serviceName}
+                                <div className="admin-status-table-sub">{money(a.price)}</div>
+                              </td>
+                              <td>
+                                {new Date(a.startAtUtc).toLocaleString('ru-RU', {
+                                  day: '2-digit',
+                                  month: '2-digit',
+                                  year: 'numeric',
+                                  hour: '2-digit',
+                                  minute: '2-digit',
+                                })}
+                              </td>
+                              <td>
+                                <span className={`badge ${statusClass(a.status)}`}>
+                                  {statusLabel(a.status)}
+                                </span>
+                              </td>
+                              <td>
+                                {actions.length === 0 ? (
+                                  <span className="muted">—</span>
+                                ) : (
+                                  <div className="admin-actions">
+                                    {actions.map((item) => (
+                                      <button
+                                        key={item.key}
+                                        type="button"
+                                        className="btn btn-ghost btn-xs"
+                                        style={item.danger
+                                          ? { color: 'var(--danger)', borderColor: 'var(--danger)' }
+                                          : undefined}
+                                        disabled={statusBusy === a.id}
+                                        onClick={item.run}
+                                      >
+                                        {item.label === 'Отменено' ? 'Удалить' : item.label}
+                                      </button>
+                                    ))}
+                                  </div>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </div>
             )}
 

@@ -1236,6 +1236,17 @@ button.admin-tg-badge:hover {
   display: inline-flex; align-items: center; gap: .25rem;
 }
 .admin-chart-legend-item.muted { opacity: .85; }
+.admin-chart-legend-btn {
+  margin: 0; padding: .1rem .25rem; border: 0; border-radius: 2px;
+  background: transparent; color: inherit; font: inherit; cursor: pointer;
+  transition: color .15s, background .15s, opacity .15s;
+}
+.admin-chart-legend-btn:hover { color: var(--text); background: rgba(255,255,255,.04); }
+.admin-chart-legend-btn.is-active {
+  color: var(--text); font-weight: 600;
+  background: rgba(201, 122, 53, .12);
+}
+.admin-chart-legend-btn.is-dimmed { opacity: .45; }
 .admin-chart-dot {
   width: .4rem; height: .4rem; border-radius: 50%; background: var(--copper);
   display: inline-block;
@@ -1244,6 +1255,23 @@ button.admin-tg-badge:hover {
 .admin-chart-dot.cancelled, .admin-chart-dot.noshow { background: var(--danger); }
 .admin-chart-dot.rescheduled { background: var(--warn); }
 .admin-chart-dot.completed { background: var(--copper); }
+.admin-status-table {
+  margin-bottom: .55rem;
+  padding: .65rem .85rem !important;
+  min-height: 0 !important;
+}
+.admin-status-table-head {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: .75rem; margin-bottom: .55rem; flex-wrap: wrap;
+}
+.admin-status-table-count { color: var(--muted); font-weight: 500; }
+.admin-status-table-scroll { overflow-x: auto; }
+.admin-status-table .table { margin: 0; }
+.admin-status-table .table th,
+.admin-status-table .table td {
+  padding: .45rem .55rem; font-size: .82rem; vertical-align: top;
+}
+.admin-status-table-sub { color: var(--muted); font-size: .75rem; margin-top: .1rem; }
 .admin-filters {
   display: flex;
   flex-wrap: wrap;
@@ -1375,6 +1403,16 @@ button.admin-tg-badge:hover {
 .admin-donut {
   width: 7.5rem; height: 7.5rem; flex-shrink: 0;
 }
+.admin-donut-seg {
+  cursor: pointer;
+  pointer-events: stroke;
+  transition: opacity .15s, stroke-width .15s;
+}
+.admin-donut-seg:hover { opacity: .9; }
+.admin-donut-seg.is-dimmed { opacity: .35; }
+.admin-donut-seg.is-active { opacity: 1; }
+.admin-donut-seg:focus { outline: none; }
+.admin-donut-seg:focus-visible { filter: brightness(1.15); }
 .admin-donut-center {
   fill: var(--bg-elevated);
 }
