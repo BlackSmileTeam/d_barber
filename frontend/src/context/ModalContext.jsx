@@ -25,6 +25,7 @@ export function ModalProvider({ children }) {
                 ))}
               </div>
             )}
+            {modal.content}
             <div className="modal-actions">
               {(modal.actions || [{ label: 'Закрыть', onClick: close, primary: true }]).map((action) => (
                 <button

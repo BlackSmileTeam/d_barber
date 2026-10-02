@@ -1199,47 +1199,6 @@ export default function AdminPage() {
               )}
             </div>
 
-            {reschedule && (
-              <div className="panel admin-reschedule">
-                <strong className="admin-card-title">Перенос: {reschedule.appt?.clientName}</strong>
-                <div className="admin-form-row" style={{ marginTop: '.75rem' }}>
-                  <label>
-                    Дата
-                    <input
-                      type="date"
-                      value={reschedule.date}
-                      onChange={(e) => loadRescheduleSlots(e.target.value)}
-                    />
-                  </label>
-                  <label>
-                    Слот
-                    <select
-                      value={reschedule.slot}
-                      onChange={(e) => setReschedule((prev) => ({ ...prev, slot: e.target.value }))}
-                    >
-                      <option value="">Выберите время</option>
-                      {(reschedule.slots || []).map((s) => (
-                        <option key={s} value={s}>
-                          {new Date(s).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                </div>
-                <div className="admin-actions" style={{ marginTop: '.75rem' }}>
-                  <button
-                    type="button"
-                    className="btn btn-primary"
-                    disabled={!reschedule.slot || statusBusy === reschedule.id}
-                    onClick={() => setAppointmentStatus(reschedule.appt, 'Rescheduled', reschedule.slot)}
-                  >
-                    Сохранить перенос
-                  </button>
-                  <button type="button" className="btn btn-ghost" onClick={() => setReschedule(null)}>Отмена</button>
-                </div>
-              </div>
-            )}
-
             <div className="admin-calendar-wrap">
               <div className="panel admin-calendar">
                 <div className="admin-cal-head">
@@ -1443,7 +1402,7 @@ export default function AdminPage() {
         )}
 
         {!loadFailed && tab === 'clients' && (
-          <>
+          <div className="admin-section">
             <SectionToolbar title="Клиенты" />
             {clients.length === 0 ? (
               <p className="empty-block">Данные отсутствуют</p>
@@ -1504,7 +1463,7 @@ export default function AdminPage() {
                 ))}
               </div>
             )}
-          </>
+          </div>
         )}
 
         {!loadFailed && tab === 'templates' && (
@@ -1570,54 +1529,125 @@ export default function AdminPage() {
         )}
 
         {!loadFailed && tab === 'settings' && (
-          !salon ? (
-            <p className="empty-block">Данные отсутствуют</p>
-          ) : (
-            <form className="form admin-salon-form" onSubmit={saveSalon}>
-              <SectionToolbar title="Настройки салона" />
-              <div className="admin-salon-top">
-                <label className="admin-salon-photo" title={uploading ? 'Загрузка…' : 'Изменить фото'}>
-                  {aboutPreview ? (
-                    <img src={aboutPreview} alt="Фото салона" />
-                  ) : (
-                    <span className="admin-salon-photo-empty">Нет фото</span>
-                  )}
-                  <span className="admin-salon-photo-edit" aria-hidden="true">
-                    <PencilIcon />
-                  </span>
-                  <input
-                    type="file"
-                    accept="image/jpeg,image/png,image/webp"
-                    hidden
-                    disabled={uploading}
-                    onChange={uploadAboutPhoto}
-                  />
-                </label>
-                <div className="admin-salon-fields">
-                  <label>Бренд<input value={salon.brandName} onChange={(e) => setSalon({ ...salon, brandName: e.target.value })} /></label>
-                  <label>Название салона<input value={salon.salonName} onChange={(e) => setSalon({ ...salon, salonName: e.target.value })} /></label>
-                  <label>Телефон<input value={salon.phone || ''} onChange={(e) => setSalon({ ...salon, phone: e.target.value })} /></label>
-                  <label>Instagram (ссылка)<input value={salon.instagramUrl || ''} onChange={(e) => setSalon({ ...salon, instagramUrl: e.target.value })} placeholder="https://www.instagram.com/…" /></label>
-                  <label>Telegram (ссылка)<input value={salon.telegramUrl || ''} onChange={(e) => setSalon({ ...salon, telegramUrl: e.target.value })} placeholder="https://t.me/…" /></label>
-                </div>
-              </div>
-              <div className="admin-salon-below">
-                <label>Адрес<input value={salon.address} onChange={(e) => setSalon({ ...salon, address: e.target.value })} /></label>
-                <label>
-                  Обо мне
-                  <textarea
-                    rows={8}
-                    value={salon.aboutHtml || ''}
-                    onChange={(e) => setSalon({ ...salon, aboutHtml: e.target.value })}
-                    placeholder="Текст блока «Обо мне» (абзацы через пустую строку)"
-                  />
-                </label>
-              </div>
-              {salonDirty && <button className="btn btn-primary" type="submit">Сохранить</button>}
-            </form>
-          )
+          <div className="admin-section">
+            {!salon ? (
+              <p className="empty-block">Данные отсутствуют</p>
+            ) : (
+              <>
+                <SectionToolbar title="Настройки салона" />
+                <form className="form admin-salon-form" onSubmit={saveSalon}>
+                  <div className="admin-salon-top">
+                    <label className="admin-salon-photo" title={uploading ? 'Загрузка…' : 'Изменить фото'}>
+                      {aboutPreview ? (
+                        <img src={aboutPreview} alt="Фото салона" />
+                      ) : (
+                        <span className="admin-salon-photo-empty">Нет фото</span>
+                      )}
+                      <span className="admin-salon-photo-edit" aria-hidden="true">
+                        <PencilIcon />
+                      </span>
+                      <input
+                        type="file"
+                        accept="image/jpeg,image/png,image/webp"
+                        hidden
+                        disabled={uploading}
+                        onChange={uploadAboutPhoto}
+                      />
+                    </label>
+                    <div className="admin-salon-fields">
+                      <label>Бренд<input value={salon.brandName} onChange={(e) => setSalon({ ...salon, brandName: e.target.value })} /></label>
+                      <label>Название салона<input value={salon.salonName} onChange={(e) => setSalon({ ...salon, salonName: e.target.value })} /></label>
+                      <label>Телефон<input value={salon.phone || ''} onChange={(e) => setSalon({ ...salon, phone: e.target.value })} /></label>
+                      <label>Instagram (ссылка)<input value={salon.instagramUrl || ''} onChange={(e) => setSalon({ ...salon, instagramUrl: e.target.value })} placeholder="https://www.instagram.com/…" /></label>
+                      <label>Telegram (ссылка)<input value={salon.telegramUrl || ''} onChange={(e) => setSalon({ ...salon, telegramUrl: e.target.value })} placeholder="https://t.me/…" /></label>
+                    </div>
+                  </div>
+                  <div className="admin-salon-below">
+                    <label>Адрес<input value={salon.address} onChange={(e) => setSalon({ ...salon, address: e.target.value })} /></label>
+                    <label>
+                      Обо мне
+                      <textarea
+                        rows={8}
+                        value={salon.aboutHtml || ''}
+                        onChange={(e) => setSalon({ ...salon, aboutHtml: e.target.value })}
+                        placeholder="Текст блока «Обо мне» (абзацы через пустую строку)"
+                      />
+                    </label>
+                  </div>
+                  {salonDirty && <button className="btn btn-primary" type="submit">Сохранить</button>}
+                </form>
+              </>
+            )}
+          </div>
         )}
       </main>
+
+      {reschedule && (
+        <div
+          className="modal-backdrop"
+          onClick={() => setReschedule(null)}
+          role="presentation"
+        >
+          <div
+            className="modal admin-reschedule-modal"
+            onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="admin-reschedule-title"
+          >
+            <h3 id="admin-reschedule-title">Перенос записи</h3>
+            <p>
+              {reschedule.appt?.clientName}
+              {reschedule.appt?.serviceName ? ` · ${reschedule.appt.serviceName}` : ''}
+            </p>
+            <div className="form modal-form">
+              <label>
+                Новая дата
+                <input
+                  type="date"
+                  value={reschedule.date}
+                  onChange={(e) => loadRescheduleSlots(e.target.value)}
+                />
+              </label>
+              <label>
+                Время
+                <select
+                  value={reschedule.slot}
+                  onChange={(e) => setReschedule((prev) => ({ ...prev, slot: e.target.value }))}
+                >
+                  <option value="">Выберите слот</option>
+                  {(reschedule.slots || []).map((s) => (
+                    <option key={s} value={s}>
+                      {new Date(s).toLocaleString('ru-RU', {
+                        day: '2-digit',
+                        month: '2-digit',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                      })}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              {(reschedule.slots || []).length === 0 && reschedule.date && (
+                <p className="admin-reschedule-empty">На эту дату свободных слотов нет</p>
+              )}
+            </div>
+            <div className="modal-actions">
+              <button
+                type="button"
+                className="btn btn-primary"
+                disabled={!reschedule.slot || statusBusy === reschedule.id}
+                onClick={() => setAppointmentStatus(reschedule.appt, 'Rescheduled', reschedule.slot)}
+              >
+                Сохранить перенос
+              </button>
+              <button type="button" className="btn btn-ghost" onClick={() => setReschedule(null)}>
+                Отмена
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
