@@ -22,15 +22,16 @@ public class SlotService(BarberDbContext db)
         var service = await db.Services.AsNoTracking().FirstOrDefaultAsync(s => s.Id == serviceId && s.IsActive, ct)
             ?? throw new InvalidOperationException("Услуга не найдена");
 
-        var settings = await db.SalonSettings.AsNoTracking().FirstAsync(ct);
-        var tz = GetTz(settings.TimeZoneId);
-        var dow = (int)date.DayOfWeek;
-        var schedule = await db.WorkSchedules.AsNoTracking().FirstOrDefaultAsync(s => s.DayOfWeek == dow, ct);
-        if (schedule is null || schedule.IsDayOff)
+        // Explicit working days only — unmarked dates are days off.
+        var workingDay = await db.WorkingDays.AsNoTracking().FirstOrDefaultAsync(w => w.Date == date, ct);
+        if (workingDay is null)
             return [];
 
-        var dayStartLocal = date.ToDateTime(TimeOnly.FromTimeSpan(schedule.StartTime));
-        var dayEndLocal = date.ToDateTime(TimeOnly.FromTimeSpan(schedule.EndTime));
+        var settings = await db.SalonSettings.AsNoTracking().FirstAsync(ct);
+        var tz = GetTz(settings.TimeZoneId);
+
+        var dayStartLocal = date.ToDateTime(TimeOnly.FromTimeSpan(workingDay.StartTime));
+        var dayEndLocal = date.ToDateTime(TimeOnly.FromTimeSpan(workingDay.EndTime));
         var dayStartUtc = TimeZoneInfo.ConvertTimeToUtc(DateTime.SpecifyKind(dayStartLocal, DateTimeKind.Unspecified), tz);
         var dayEndUtc = TimeZoneInfo.ConvertTimeToUtc(DateTime.SpecifyKind(dayEndLocal, DateTimeKind.Unspecified), tz);
 
@@ -62,5 +63,17 @@ public class SlotService(BarberDbContext db)
         }
 
         return slots;
+    }
+
+    /// <summary>
+    /// Resolves default open hours for a weekday from WorkSchedule, or 10:00–20:00.
+    /// </summary>
+    public async Task<(TimeSpan Start, TimeSpan End)> GetDefaultHoursAsync(DayOfWeek dayOfWeek, CancellationToken ct = default)
+    {
+        var schedule = await db.WorkSchedules.AsNoTracking()
+            .FirstOrDefaultAsync(s => s.DayOfWeek == (int)dayOfWeek && !s.IsDayOff, ct);
+        if (schedule is not null)
+            return (schedule.StartTime, schedule.EndTime);
+        return (new TimeSpan(10, 0, 0), new TimeSpan(20, 0, 0));
     }
 }

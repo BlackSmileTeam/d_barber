@@ -11,7 +11,7 @@ public static class DbSeeder
         (
             "booking_created",
             "Новая запись",
-            "Сразу после создания записи клиентом — уведомление администратору",
+            "Шаблон больше не рассылается автоматически (подтверждение клиенту отправляет бот/сайт)",
             TriggerIntervalType.None,
             null,
             "Новая запись: {Клиент}, {Услуга}, {Дата} в {Время}. {НазваниеСалона}, {Адрес}."
@@ -146,6 +146,13 @@ public static class DbSeeder
                 if (string.IsNullOrWhiteSpace(existing.Title)
                     || existing.Title.Equals(t.Key, StringComparison.OrdinalIgnoreCase))
                     existing.Title = t.Title;
+
+                if (t.Key == "booking_created"
+                    && (string.IsNullOrWhiteSpace(existing.TriggerDescription)
+                        || existing.TriggerDescription.Contains("уведомление администратору", StringComparison.OrdinalIgnoreCase)))
+                {
+                    existing.TriggerDescription = t.Trigger;
+                }
 
                 // Keep system reminder template structured with map link.
                 if (t.Key == "reminder_2h"
@@ -351,6 +358,51 @@ public static class DbSeeder
         try
         {
             await db.Database.ExecuteSqlRawAsync(createOutbox);
+        }
+        catch
+        {
+            // Table already exists / provider difference.
+        }
+
+        var createWorkingDays = isMysql
+            ? """
+              CREATE TABLE IF NOT EXISTS WorkingDays (
+                Id CHAR(36) NOT NULL PRIMARY KEY,
+                Date DATE NOT NULL,
+                StartTime TIME NOT NULL,
+                EndTime TIME NOT NULL,
+                UNIQUE INDEX IX_WorkingDays_Date (Date)
+              )
+              """
+            : """
+              CREATE TABLE IF NOT EXISTS WorkingDays (
+                Id TEXT NOT NULL PRIMARY KEY,
+                Date TEXT NOT NULL,
+                StartTime TEXT NOT NULL,
+                EndTime TEXT NOT NULL
+              );
+              CREATE UNIQUE INDEX IF NOT EXISTS IX_WorkingDays_Date ON WorkingDays (Date);
+              """;
+        try
+        {
+            if (isMysql)
+            {
+                await db.Database.ExecuteSqlRawAsync(createWorkingDays);
+            }
+            else
+            {
+                await db.Database.ExecuteSqlRawAsync(
+                    """
+                    CREATE TABLE IF NOT EXISTS WorkingDays (
+                      Id TEXT NOT NULL PRIMARY KEY,
+                      Date TEXT NOT NULL,
+                      StartTime TEXT NOT NULL,
+                      EndTime TEXT NOT NULL
+                    )
+                    """);
+                await db.Database.ExecuteSqlRawAsync(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS IX_WorkingDays_Date ON WorkingDays (Date)");
+            }
         }
         catch
         {

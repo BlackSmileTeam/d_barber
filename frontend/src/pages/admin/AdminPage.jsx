@@ -178,6 +178,8 @@ export default function AdminPage() {
     return new Date(n.getFullYear(), n.getMonth(), 1);
   });
   const [selectedDay, setSelectedDay] = useState(() => toLocalYmd(new Date()));
+  const [workingDays, setWorkingDays] = useState(() => new Set());
+  const [dayTypeBusy, setDayTypeBusy] = useState(false);
   const [createDraft, setCreateDraft] = useState({ clientId: '', serviceId: '', slot: '', slots: [] });
   const [showCreate, setShowCreate] = useState(false);
   const [createBusy, setCreateBusy] = useState(false);
@@ -223,9 +225,29 @@ export default function AdminPage() {
       });
   };
 
+  const loadWorkingDays = (monthDate) => {
+    if (auth?.role !== 'Admin') return;
+    const year = monthDate.getFullYear();
+    const month = monthDate.getMonth();
+    const from = toLocalYmd(new Date(year, month, 1));
+    const to = toLocalYmd(new Date(year, month + 1, 0));
+    api.get('/admin/working-days', { params: { from, to } })
+      .then(({ data }) => {
+        const next = new Set((data || []).filter((d) => d.isWorking).map((d) => d.date));
+        setWorkingDays(next);
+      })
+      .catch((err) => {
+        if (err?.response?.status === 401) return;
+      });
+  };
+
   useEffect(() => {
     reload();
   }, [auth]);
+
+  useEffect(() => {
+    loadWorkingDays(calMonth);
+  }, [auth, calMonth]);
 
   const salonDirty = useMemo(() => {
     if (!salon || !salonBaseline) return false;
@@ -342,6 +364,26 @@ export default function AdminPage() {
   };
 
   const todayYmd = toLocalYmd(new Date());
+  const selectedIsWorking = workingDays.has(selectedDay);
+
+  const setDayType = async (isWorking) => {
+    if (!selectedDay || dayTypeBusy) return;
+    if (selectedIsWorking === isWorking) return;
+    setDayTypeBusy(true);
+    try {
+      const { data } = await api.put(`/admin/working-days/${selectedDay}`, { isWorking });
+      setWorkingDays((prev) => {
+        const next = new Set(prev);
+        if (data?.isWorking) next.add(selectedDay);
+        else next.delete(selectedDay);
+        return next;
+      });
+    } catch (err) {
+      show({ title: 'Ошибка', message: apiErrorMessage(err) });
+    } finally {
+      setDayTypeBusy(false);
+    }
+  };
 
   if (!auth || auth.role !== 'Admin') {
     return <Navigate to="/admin/login" replace />;
@@ -1157,48 +1199,6 @@ export default function AdminPage() {
               </div>
             )}
 
-            <div className="admin-filters panel">
-              <label>
-                Клиент
-                <input
-                  type="search"
-                  placeholder="Имя или телефон"
-                  value={filterClient}
-                  onChange={(e) => setFilterClient(e.target.value)}
-                />
-              </label>
-              <label>
-                Услуга
-                <select value={filterService} onChange={(e) => setFilterService(e.target.value)}>
-                  <option value="">Все услуги</option>
-                  {services.map((s) => (
-                    <option key={s.id} value={s.id}>{s.name}</option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                Статус
-                <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)}>
-                  {STATUS_OPTIONS.map((o) => (
-                    <option key={o.value || 'all'} value={o.value}>{o.label}</option>
-                  ))}
-                </select>
-              </label>
-              {(filterClient || filterService || filterStatus) && (
-                <button
-                  type="button"
-                  className="btn btn-ghost btn-xs"
-                  onClick={() => {
-                    setFilterClient('');
-                    setFilterService('');
-                    setFilterStatus('');
-                  }}
-                >
-                  Сбросить
-                </button>
-              )}
-            </div>
-
             <div className="admin-calendar-wrap">
               <div className="panel admin-calendar">
                 <div className="admin-cal-head">
@@ -1230,6 +1230,7 @@ export default function AdminPage() {
                   {calendarCells.map((cell) => {
                     const dayItems = appointmentsByDay.get(cell.key) || [];
                     const dots = dayItems.slice(0, 4);
+                    const isWorking = workingDays.has(cell.key);
                     return (
                       <button
                         key={cell.key}
@@ -1239,10 +1240,15 @@ export default function AdminPage() {
                           cell.inMonth ? '' : 'muted',
                           cell.key === selectedDay ? 'selected' : '',
                           cell.key === todayYmd ? 'today' : '',
+                          isWorking ? 'is-working' : 'is-dayoff',
                         ].filter(Boolean).join(' ')}
                         onClick={() => selectCalendarDay(cell.key)}
+                        title={isWorking ? 'Рабочий день' : 'Выходной'}
                       >
                         <span className="admin-cal-day-num">{cell.date.getDate()}</span>
+                        <span className={`admin-cal-day-type ${isWorking ? 'working' : 'dayoff'}`}>
+                          {isWorking ? 'раб.' : 'вых.'}
+                        </span>
                         {dayItems.length > 0 && (
                           <>
                             <span className="admin-cal-dots">
@@ -1259,14 +1265,91 @@ export default function AdminPage() {
                 </div>
               </div>
 
-              <div className="panel admin-day-panel">
+              <div className="admin-calendar-aside">
+                <div className="admin-filters panel">
+                  <label>
+                    Клиент
+                    <input
+                      type="search"
+                      placeholder="Имя или телефон"
+                      value={filterClient}
+                      onChange={(e) => setFilterClient(e.target.value)}
+                    />
+                  </label>
+                  <label>
+                    Услуга
+                    <select value={filterService} onChange={(e) => setFilterService(e.target.value)}>
+                      <option value="">Все услуги</option>
+                      {services.map((s) => (
+                        <option key={s.id} value={s.id}>{s.name}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    Статус
+                    <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)}>
+                      {STATUS_OPTIONS.map((o) => (
+                        <option key={o.value || 'all'} value={o.value}>{o.label}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <div className="admin-day-type">
+                    <span className="admin-day-type-label">Тип дня</span>
+                    <div className="admin-day-type-btns">
+                      <button
+                        type="button"
+                        className={`btn btn-xs ${selectedIsWorking ? 'btn-primary' : 'btn-ghost'}`}
+                        disabled={dayTypeBusy || selectedIsWorking}
+                        onClick={() => setDayType(true)}
+                      >
+                        Рабочий
+                      </button>
+                      <button
+                        type="button"
+                        className={`btn btn-xs ${!selectedIsWorking ? 'btn-primary' : 'btn-ghost'}`}
+                        disabled={dayTypeBusy || !selectedIsWorking}
+                        onClick={() => setDayType(false)}
+                      >
+                        Выходной
+                      </button>
+                    </div>
+                    <p className="admin-day-type-hint">
+                      {new Date(`${selectedDay}T12:00:00`).toLocaleDateString('ru-RU', {
+                        weekday: 'short', day: 'numeric', month: 'short',
+                      })}
+                      {' · '}
+                      {selectedIsWorking ? 'рабочий' : 'выходной'}
+                    </p>
+                  </div>
+                  {(filterClient || filterService || filterStatus) && (
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-xs"
+                      onClick={() => {
+                        setFilterClient('');
+                        setFilterService('');
+                        setFilterStatus('');
+                      }}
+                    >
+                      Сбросить
+                    </button>
+                  )}
+                </div>
+
+                <div className="panel admin-day-panel">
                 <div className="admin-day-panel-head">
                   <strong className="admin-card-title">
                     {new Date(`${selectedDay}T12:00:00`).toLocaleDateString('ru-RU', {
                       weekday: 'long', day: 'numeric', month: 'long',
                     })}
                   </strong>
-                  <button type="button" className="btn btn-primary btn-xs" onClick={openCreateForDay}>
+                  <button
+                    type="button"
+                    className="btn btn-primary btn-xs"
+                    onClick={openCreateForDay}
+                    disabled={!selectedIsWorking}
+                    title={selectedIsWorking ? undefined : 'Сначала отметьте день как рабочий'}
+                  >
                     Создать запись
                   </button>
                 </div>
@@ -1378,6 +1461,7 @@ export default function AdminPage() {
                     </div>
                   </div>
                 )}
+              </div>
               </div>
             </div>
           </>

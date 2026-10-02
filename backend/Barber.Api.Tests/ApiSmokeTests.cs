@@ -50,9 +50,29 @@ public class ApiSmokeTests : IClassFixture<BarberApiFactory>
         var service = services[0];
 
         var day = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(2));
-        // find weekday Mon-Sat
         while (day.DayOfWeek is DayOfWeek.Sunday)
             day = day.AddDays(1);
+
+        // Mark the day as working (default calendar days are off).
+        var adminLoginForDay = await _client.PostAsJsonAsync("/api/auth/admin/login", new
+        {
+            login = "admin",
+            password = "admin123"
+        });
+        Assert.Equal(HttpStatusCode.OK, adminLoginForDay.StatusCode);
+        var adminAuth = await adminLoginForDay.Content.ReadFromJsonAsync<AuthDto>(JsonOpts);
+        Assert.NotNull(adminAuth?.Token);
+        _client.DefaultRequestHeaders.Authorization =
+            new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", adminAuth.Token);
+
+        var setWorking = await _client.PutAsJsonAsync($"/api/admin/working-days/{day:yyyy-MM-dd}", new
+        {
+            isWorking = true
+        });
+        Assert.Equal(HttpStatusCode.OK, setWorking.StatusCode);
+
+        _client.DefaultRequestHeaders.Authorization =
+            new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", auth.Token);
 
         var slotsResp = await _client.GetAsync($"/api/appointments/slots?serviceId={service.Id}&date={day:yyyy-MM-dd}");
         slotsResp.EnsureSuccessStatusCode();

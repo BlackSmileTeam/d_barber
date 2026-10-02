@@ -14,6 +14,7 @@ public class BarberDbContext : DbContext
     public DbSet<AdminUser> AdminUsers => Set<AdminUser>();
     public DbSet<Appointment> Appointments => Set<Appointment>();
     public DbSet<WorkSchedule> WorkSchedules => Set<WorkSchedule>();
+    public DbSet<WorkingDay> WorkingDays => Set<WorkingDay>();
     public DbSet<TimeOff> TimeOffs => Set<TimeOff>();
     public DbSet<PortfolioItem> PortfolioItems => Set<PortfolioItem>();
     public DbSet<NewsPost> NewsPosts => Set<NewsPost>();
@@ -73,6 +74,11 @@ public class BarberDbContext : DbContext
         modelBuilder.Entity<PortfolioItem>(e =>
         {
             e.Property(x => x.DisplayPrice).HasPrecision(10, 2);
+        });
+
+        modelBuilder.Entity<WorkingDay>(e =>
+        {
+            e.HasIndex(x => x.Date).IsUnique();
         });
 
         modelBuilder.Entity<TelegramOutboxMessage>(e =>

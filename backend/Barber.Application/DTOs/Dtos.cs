@@ -109,3 +109,7 @@ public record ResetClientPasswordDto(string? NewPassword);
 public record ResetPasswordResultDto(string Password);
 
 public record SlotsResponseDto(Guid ServiceId, string Date, IReadOnlyList<DateTime> SlotsUtc);
+
+public record WorkingDayDto(string Date, bool IsWorking, string? StartTime, string? EndTime);
+
+public record SetWorkingDayDto(bool IsWorking, string? StartTime, string? EndTime);

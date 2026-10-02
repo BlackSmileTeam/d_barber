@@ -15,8 +15,7 @@ namespace Barber.Api.Controllers;
 public class AppointmentsController(
     BarberDbContext db,
     SlotService slots,
-    TelegramNotifyService telegram,
-    IConfiguration config) : ControllerBase
+    TelegramNotifyService telegram) : ControllerBase
 {
     [HttpGet("slots")]
     public async Task<ActionResult<SlotsResponseDto>> GetSlots([FromQuery] Guid serviceId, [FromQuery] string date, CancellationToken ct)
@@ -269,11 +268,12 @@ public class AppointmentsController(
 
     private async Task NotifyBookingAsync(Appointment entity, CancellationToken ct)
     {
+        // Client confirmation only — no admin "Новая запись: …" outbox blast.
         var settings = await db.SalonSettings.AsNoTracking().FirstAsync(ct);
-        var template = await telegram.GetTemplateAsync(db, "booking_created", ct);
-        var values = BuildValues(entity, settings, config["App:FrontendPublicUrl"] ?? "");
-        var text = TelegramNotifyService.Render(template, values);
-        await telegram.NotifyAdminAsync(db, text, ct);
+        var local = entity.StartAtUtc.ToLocalTime();
+        var text =
+            $"✅ Вы записаны!\n\n✂️ {entity.Service.Name}\n📅 {local:dd.MM.yyyy}\n🕒 {local:HH:mm}\n\nДо встречи в {settings.SalonName}";
+
         if (entity.Client.TelegramChatId is long chatId)
             await telegram.NotifyChatAsync(chatId, text, ct);
         else if (entity.Client.TelegramUserId is long userId)

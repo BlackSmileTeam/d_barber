@@ -231,14 +231,7 @@ public class TelegramController(
         await db.Entry(entity).Reference(a => a.Client).LoadAsync(ct);
         await db.Entry(entity).Reference(a => a.Service).LoadAsync(ct);
 
-        var settings = await db.SalonSettings.AsNoTracking().FirstAsync(ct);
-        var template = await telegram.GetTemplateAsync(db, "booking_created", ct);
-        var values = AppointmentsController.BuildValues(entity, settings, config["App:FrontendPublicUrl"] ?? "");
-        var text = TelegramNotifyService.Render(template, values);
-        await telegram.NotifyAdminAsync(db, text, ct);
-        if (entity.Client.TelegramChatId is long chat)
-            await telegram.NotifyChatAsync(chat, text, ct);
-
+        // Bot already sends "✅ Вы записаны!" — do not queue redundant "Новая запись" blast.
         return Ok(new
         {
             entity.Id,
