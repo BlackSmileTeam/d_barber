@@ -62,11 +62,6 @@ export default function ContactsPage() {
     window.open(`https://yandex.ru/maps/?text=${encodeURIComponent(salon.address)}`, '_blank');
   };
 
-  const route = () => {
-    if (!salon?.address) return;
-    window.open(`https://yandex.ru/maps/?rtext=~${encodeURIComponent(salon.address)}&rtt=auto`, '_blank');
-  };
-
   const empty = failed || (loaded && !salon);
 
   return (
@@ -121,8 +116,7 @@ export default function ContactsPage() {
                 </div>
               )}
               <div className="contact-actions">
-                <button type="button" className="btn btn-primary btn-cta" onClick={openMap} disabled={!salon?.address}>Открыть в Яндекс.Картах</button>
-                <button type="button" className="btn btn-ghost" onClick={route} disabled={!salon?.address}>Построить маршрут</button>
+                <button type="button" className="btn btn-primary btn-cta" onClick={openMap} disabled={!salon?.address}>Мы на Яндекс.Картах</button>
               </div>
             </div>
             <div className="map-frame reveal-child" style={{ '--reveal-delay': '0.2s' }}>

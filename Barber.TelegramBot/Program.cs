@@ -784,7 +784,6 @@ public sealed class BotWorker(
             var title = string.IsNullOrWhiteSpace(salon.SalonName) ? "D_Barber" : salon.SalonName.Trim();
             var encoded = Uri.EscapeDataString(address);
             var mapUrl = $"https://yandex.ru/maps/?text={encoded}";
-            var routeUrl = $"https://yandex.ru/maps/?rtext=~{encoded}&rtt=auto";
 
             if (TryParseCoord(salon.MapLat, out var lat) && TryParseCoord(salon.MapLon, out var lon))
             {
@@ -804,8 +803,7 @@ public sealed class BotWorker(
 
             var keyboard = new InlineKeyboardMarkup(new[]
             {
-                new[] { InlineKeyboardButton.WithUrl("🗺 Открыть карту", mapUrl) },
-                new[] { InlineKeyboardButton.WithUrl("🚗 Построить маршрут", routeUrl) }
+                new[] { InlineKeyboardButton.WithUrl("🗺 Мы на Яндекс.Картах", mapUrl) }
             });
 
             await bot.SendTextMessageAsync(
