@@ -1,6 +1,6 @@
 import { BrowserRouter, Route, Routes } from 'react-router-dom';
 import Header from './components/Header';
-import { AuthProvider } from './context/AuthContext';
+import { AuthProvider, AuthSessionWatcher } from './context/AuthContext';
 import { ModalProvider } from './context/ModalContext';
 import LandingPage from './pages/LandingPage';
 import LoginPage from './pages/LoginPage';
@@ -11,9 +11,10 @@ import AdminPage from './pages/admin/AdminPage';
 
 export default function App() {
   return (
-    <AuthProvider>
-      <ModalProvider>
-        <BrowserRouter>
+    <BrowserRouter>
+      <AuthProvider>
+        <ModalProvider>
+          <AuthSessionWatcher />
           <div className="app-shell">
             <Header />
             <Routes>
@@ -29,8 +30,8 @@ export default function App() {
               <div className="container">D_Barber · Санкт-Петербург</div>
             </footer>
           </div>
-        </BrowserRouter>
-      </ModalProvider>
-    </AuthProvider>
+        </ModalProvider>
+      </AuthProvider>
+    </BrowserRouter>
   );
 }

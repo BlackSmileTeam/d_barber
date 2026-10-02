@@ -11,6 +11,39 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
+let unauthorizedHandler = null;
+let handlingUnauthorized = false;
+
+/** Register a single handler for API 401 (clears React auth + redirects). */
+export function onUnauthorized(handler) {
+  unauthorizedHandler = handler;
+}
+
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    const status = error.response?.status;
+    const url = String(error.config?.url || '');
+    const isAuthEndpoint = /\/auth\//.test(url);
+
+    if (status === 401 && !isAuthEndpoint && localStorage.getItem('dbarber_token')) {
+      if (!handlingUnauthorized) {
+        handlingUnauthorized = true;
+        setAuth(null);
+        try {
+          unauthorizedHandler?.();
+        } finally {
+          queueMicrotask(() => {
+            handlingUnauthorized = false;
+          });
+        }
+      }
+    }
+
+    return Promise.reject(error);
+  },
+);
+
 export function setAuth(auth) {
   if (auth?.token) {
     localStorage.setItem('dbarber_token', auth.token);

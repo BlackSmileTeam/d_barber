@@ -173,7 +173,10 @@ export default function AdminPage() {
         setClients(clientsRes.data || []);
         setLoadFailed(false);
       })
-      .catch(() => setLoadFailed(true));
+      .catch((err) => {
+        if (err?.response?.status === 401) return;
+        setLoadFailed(true);
+      });
   };
 
   useEffect(() => {
@@ -184,6 +187,75 @@ export default function AdminPage() {
     if (!salon || !salonBaseline) return false;
     return stableJson(salon) !== stableJson(salonBaseline);
   }, [salon, salonBaseline]);
+
+  const statusClass = (s) => (s || '').toLowerCase();
+
+  // All hooks must run before any early return (React #300 on logout / 401).
+  const filteredAppointments = useMemo(() => {
+    const clientQ = filterClient.trim().toLowerCase();
+    return appointments.filter((a) => {
+      if (filterStatus && a.status !== filterStatus) return false;
+      if (filterService && a.serviceId !== filterService) return false;
+      if (clientQ) {
+        const hay = `${a.clientName || ''} ${a.clientPhone || ''}`.toLowerCase();
+        if (!hay.includes(clientQ)) return false;
+      }
+      const start = new Date(a.startAtUtc);
+      if (filterDateFrom) {
+        const from = new Date(`${filterDateFrom}T00:00:00`);
+        if (start < from) return false;
+      }
+      if (filterDateTo) {
+        const to = new Date(`${filterDateTo}T23:59:59.999`);
+        if (start > to) return false;
+      }
+      return true;
+    });
+  }, [appointments, filterDateFrom, filterDateTo, filterClient, filterService, filterStatus]);
+
+  const monthChart = useMemo(() => {
+    if (!stats) return [];
+    const rows = [
+      {
+        key: 'prev',
+        label: stats.previousMonth?.label || 'Прошлый',
+        count: stats.previousMonth?.count ?? 0,
+        sum: Number(stats.previousMonth?.sum || 0),
+      },
+      {
+        key: 'cur',
+        label: stats.currentMonth?.label || 'Текущий',
+        count: stats.currentMonth?.count ?? 0,
+        sum: Number(stats.currentMonth?.sum || 0),
+      },
+    ];
+    const maxCount = Math.max(1, ...rows.map((r) => r.count));
+    const maxSum = Math.max(1, ...rows.map((r) => r.sum));
+    return rows.map((r) => ({
+      ...r,
+      countPct: Math.round((r.count / maxCount) * 100),
+      sumPct: Math.round((r.sum / maxSum) * 100),
+    }));
+  }, [stats]);
+
+  const statusBars = useMemo(() => {
+    const rows = stats?.byStatus || [];
+    const total = Math.max(1, rows.reduce((s, r) => s + (r.count || 0), 0));
+    return rows
+      .map((r) => ({
+        key: r.status,
+        label: statusLabel(r.status),
+        count: r.count || 0,
+        pct: Math.round(((r.count || 0) / total) * 100),
+        cls: statusClass(r.status),
+      }))
+      .filter((b) => b.count > 0)
+      .sort((a, b) => b.count - a.count);
+  }, [stats]);
+
+  if (!auth || auth.role !== 'Admin') {
+    return <Navigate to="/admin/login" replace />;
+  }
 
   const isServiceDirty = (svc) => {
     if (!svc?.id) return true;
@@ -240,9 +312,6 @@ export default function AdminPage() {
     if (!base) return true;
     return stableJson(portfolioPayload(item)) !== stableJson(portfolioPayload(base));
   };
-
-  if (!auth) return <Navigate to="/admin/login" replace />;
-  if (auth.role !== 'Admin') return <Navigate to="/" replace />;
 
   const saveSalon = async (e) => {
     e.preventDefault();
@@ -501,70 +570,7 @@ export default function AdminPage() {
     }
   };
 
-  const statusClass = (s) => (s || '').toLowerCase();
   const aboutPreview = mediaUrl(salon?.aboutImageUrl);
-
-  const filteredAppointments = useMemo(() => {
-    const clientQ = filterClient.trim().toLowerCase();
-    return appointments.filter((a) => {
-      if (filterStatus && a.status !== filterStatus) return false;
-      if (filterService && a.serviceId !== filterService) return false;
-      if (clientQ) {
-        const hay = `${a.clientName || ''} ${a.clientPhone || ''}`.toLowerCase();
-        if (!hay.includes(clientQ)) return false;
-      }
-      const start = new Date(a.startAtUtc);
-      if (filterDateFrom) {
-        const from = new Date(`${filterDateFrom}T00:00:00`);
-        if (start < from) return false;
-      }
-      if (filterDateTo) {
-        const to = new Date(`${filterDateTo}T23:59:59.999`);
-        if (start > to) return false;
-      }
-      return true;
-    });
-  }, [appointments, filterDateFrom, filterDateTo, filterClient, filterService, filterStatus]);
-
-  const monthChart = useMemo(() => {
-    if (!stats) return [];
-    const rows = [
-      {
-        key: 'prev',
-        label: stats.previousMonth?.label || 'Прошлый',
-        count: stats.previousMonth?.count ?? 0,
-        sum: Number(stats.previousMonth?.sum || 0),
-      },
-      {
-        key: 'cur',
-        label: stats.currentMonth?.label || 'Текущий',
-        count: stats.currentMonth?.count ?? 0,
-        sum: Number(stats.currentMonth?.sum || 0),
-      },
-    ];
-    const maxCount = Math.max(1, ...rows.map((r) => r.count));
-    const maxSum = Math.max(1, ...rows.map((r) => r.sum));
-    return rows.map((r) => ({
-      ...r,
-      countPct: Math.round((r.count / maxCount) * 100),
-      sumPct: Math.round((r.sum / maxSum) * 100),
-    }));
-  }, [stats]);
-
-  const statusBars = useMemo(() => {
-    const rows = stats?.byStatus || [];
-    const total = Math.max(1, rows.reduce((s, r) => s + (r.count || 0), 0));
-    return rows
-      .map((r) => ({
-        key: r.status,
-        label: statusLabel(r.status),
-        count: r.count || 0,
-        pct: Math.round(((r.count || 0) / total) * 100),
-        cls: statusClass(r.status),
-      }))
-      .filter((b) => b.count > 0)
-      .sort((a, b) => b.count - a.count);
-  }, [stats]);
 
   const money = (n) => `${Number(n || 0).toLocaleString('ru-RU')} ₽`;
 

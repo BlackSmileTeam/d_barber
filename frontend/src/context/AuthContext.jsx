@@ -1,5 +1,6 @@
-import { createContext, useContext, useMemo, useState } from 'react';
-import { getAuth, setAuth as persistAuth } from '../services/api';
+import { createContext, useContext, useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { getAuth, onUnauthorized, setAuth as persistAuth } from '../services/api';
 
 const AuthContext = createContext(null);
 
@@ -15,6 +16,27 @@ export function AuthProvider({ children }) {
 
   const value = useMemo(() => ({ auth, setAuth, logout }), [auth]);
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+}
+
+/** Must render inside BrowserRouter. Syncs 401 → clear auth + redirect. */
+export function AuthSessionWatcher() {
+  const { setAuth } = useAuth();
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    onUnauthorized(() => {
+      setAuth(null);
+      const path = window.location.pathname;
+      if (path.startsWith('/admin') && path !== '/admin/login') {
+        navigate('/admin/login', { replace: true });
+      } else if (path === '/cabinet') {
+        navigate('/login', { replace: true });
+      }
+    });
+    return () => onUnauthorized(null);
+  }, [setAuth, navigate]);
+
+  return null;
 }
 
 export function useAuth() {

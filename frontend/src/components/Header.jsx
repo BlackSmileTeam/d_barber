@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link, useLocation } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 
 const sections = [
@@ -14,10 +14,21 @@ const sections = [
 export default function Header() {
   const { auth, logout } = useAuth();
   const location = useLocation();
+  const navigate = useNavigate();
   const onLanding = location.pathname === '/';
   const [open, setOpen] = useState(false);
 
   const close = () => setOpen(false);
+
+  const handleLogout = () => {
+    const wasAdmin = auth?.role === 'Admin';
+    const onAdminRoute = location.pathname.startsWith('/admin');
+    logout();
+    close();
+    if (wasAdmin || onAdminRoute) {
+      navigate('/admin/login', { replace: true });
+    }
+  };
 
   return (
     <header className={`site-header${open ? ' is-open' : ''}`}>
@@ -50,7 +61,7 @@ export default function Header() {
 
         <div className="header-actions">
           {auth ? (
-            <button type="button" className="btn btn-logout" onClick={() => { logout(); close(); }}>Выйти</button>
+            <button type="button" className="btn btn-logout" onClick={handleLogout}>Выйти</button>
           ) : (
             <Link to="/login" className="nav-login" onClick={close}>Войти</Link>
           )}
