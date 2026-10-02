@@ -6,7 +6,7 @@ export default function HomePage() {
         <div className="hero-fade" aria-hidden="true" />
         <div className="container hero-content">
           <p className="hero-brand">D_Barber</p>
-          <h1>Стрижка и борода в Санкт-Петербурге</h1>
+          <h1>Стрижки в Санкт-Петербурге</h1>
           <p className="hero-tagline">Точная работа и спокойная атмосфера.</p>
           <div className="hero-actions">
             <a className="btn btn-primary btn-cta" href="#book">Записаться</a>

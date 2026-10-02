@@ -22,7 +22,7 @@ public static class DbSeeder
             "За 2 часа до начала визита — клиенту в Telegram",
             TriggerIntervalType.None,
             null,
-            "{Имя}, через 2 часа запись на «{Услуга}» — {Дата} в {Время}. Ждём вас в {НазваниеСалона}: {Адрес}."
+            "👋 {Имя}, через 2 часа ждём вас!\n\n⏰ Когда: {Дата} в {Время}\n✂️ Услуга: «{Услуга}»\n📍 Где: {НазваниеСалона}\n{Адрес}\n🗺 Карта: {СсылкаНаКарту}"
         ),
         (
             "monthly_comeback",
@@ -146,6 +146,15 @@ public static class DbSeeder
                 if (string.IsNullOrWhiteSpace(existing.Title)
                     || existing.Title.Equals(t.Key, StringComparison.OrdinalIgnoreCase))
                     existing.Title = t.Title;
+
+                // Keep system reminder template structured with map link.
+                if (t.Key == "reminder_2h"
+                    && (string.IsNullOrWhiteSpace(existing.Body)
+                        || !existing.Body.Contains("{СсылкаНаКарту}", StringComparison.Ordinal)
+                        || !existing.Body.Contains('\n')))
+                {
+                    existing.Body = t.Body;
+                }
             }
         }
 

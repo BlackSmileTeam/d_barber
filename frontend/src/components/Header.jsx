@@ -46,12 +46,15 @@ export default function Header() {
           ))}
           {auth?.role === 'Client' && <Link to="/cabinet" onClick={close}>Кабинет</Link>}
           {auth?.role === 'Admin' && <Link to="/admin" onClick={close}>Админка</Link>}
+        </nav>
+
+        <div className="header-actions">
           {auth ? (
             <button type="button" className="btn btn-logout" onClick={() => { logout(); close(); }}>Выйти</button>
           ) : (
             <Link to="/login" className="nav-login" onClick={close}>Войти</Link>
           )}
-        </nav>
+        </div>
       </div>
     </header>
   );

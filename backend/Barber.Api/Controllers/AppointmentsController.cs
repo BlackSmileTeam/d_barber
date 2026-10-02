@@ -252,8 +252,18 @@ public class AppointmentsController(
         ["Время"] = entity.StartAtUtc.ToLocalTime().ToString("HH:mm"),
         ["НазваниеСалона"] = settings.SalonName,
         ["Адрес"] = settings.Address,
-        ["СсылкаНаЗапись"] = $"{frontendUrl.TrimEnd('/')}{settings.BookingUrl}"
+        ["СсылкаНаЗапись"] = $"{frontendUrl.TrimEnd('/')}{settings.BookingUrl}",
+        ["СсылкаНаКарту"] = BuildMapUrl(settings)
     };
+
+    public static string BuildMapUrl(SalonSettings settings)
+    {
+        var address = (settings.Address ?? "").Trim();
+        if (string.IsNullOrWhiteSpace(address))
+            return "https://yandex.ru/maps/";
+
+        return $"https://yandex.ru/maps/?text={Uri.EscapeDataString(address)}";
+    }
 
     private static AppointmentDto Map(Appointment a) => new(
         a.Id, a.ServiceId, a.Service.Name, a.Service.Price, a.Service.DurationMinutes,

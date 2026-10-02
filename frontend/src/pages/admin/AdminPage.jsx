@@ -73,12 +73,19 @@ const intervalLabel = (type, days) => {
 
 const stableJson = (value) => JSON.stringify(value, Object.keys(value || {}).sort());
 
-const TrashIcon = () => (
+  const TrashIcon = () => (
   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
     <path d="M3 6h18" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
     <path d="M8 6V4.5A1.5 1.5 0 0 1 9.5 3h5A1.5 1.5 0 0 1 16 4.5V6" stroke="currentColor" strokeWidth="1.8" />
     <path d="M19 6l-1 14.5A1.5 1.5 0 0 1 16.5 22h-9A1.5 1.5 0 0 1 6 20.5L5 6" stroke="currentColor" strokeWidth="1.8" />
     <path d="M10 11v6M14 11v6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+  </svg>
+);
+
+const PencilIcon = () => (
+  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+    <path d="M4 20h4.5L19 9.5 14.5 5 4 15.5V20z" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" />
+    <path d="M12.5 7l4.5 4.5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
   </svg>
 );
 
@@ -103,7 +110,7 @@ const TgIcon = () => (
 );
 
 export default function AdminPage() {
-  const { auth, logout } = useAuth();
+  const { auth } = useAuth();
   const [appointments, setAppointments] = useState([]);
   const [stats, setStats] = useState(null);
   const [services, setServices] = useState([]);
@@ -667,6 +674,7 @@ export default function AdminPage() {
 
   const renderServiceForm = (svc, idx, isNew = false) => {
     const dirty = isNew || isServiceDirty(svc);
+    const setField = (patch) => (isNew ? setNewService({ ...svc, ...patch }) : patchService(idx, patch));
     return (
       <div key={svc.id || 'new-service'} className="panel" style={{ marginBottom: '1rem' }}>
         <div className="admin-card-head">
@@ -677,19 +685,26 @@ export default function AdminPage() {
             </button>
           )}
         </div>
-        <div className="form admin-service-grid" style={{ marginTop: '.75rem' }}>
-          <div className="admin-service-col">
-            <label>Название<input value={svc.name} onChange={(e) => (isNew ? setNewService({ ...svc, name: e.target.value }) : patchService(idx, { name: e.target.value }))} /></label>
-            <label>Описание<textarea rows={3} value={svc.description || ''} onChange={(e) => (isNew ? setNewService({ ...svc, description: e.target.value }) : patchService(idx, { description: e.target.value }))} /></label>
-            <label className="admin-check">
-              <input type="checkbox" checked={!!svc.isActive} onChange={(e) => (isNew ? setNewService({ ...svc, isActive: e.target.checked }) : patchService(idx, { isActive: e.target.checked }))} />
-              Активна (показывается клиентам)
+        <div className="form admin-service-form" style={{ marginTop: '.75rem' }}>
+          <label>Название<input value={svc.name} onChange={(e) => setField({ name: e.target.value })} /></label>
+          <div className="admin-service-body">
+            <label className="admin-service-desc">
+              Описание
+              <textarea
+                rows={3}
+                value={svc.description || ''}
+                onChange={(e) => setField({ description: e.target.value })}
+              />
             </label>
-          </div>
-          <div className="admin-service-col">
-            <label>Цена, ₽<input type="number" value={svc.price} onChange={(e) => (isNew ? setNewService({ ...svc, price: e.target.value }) : patchService(idx, { price: e.target.value }))} /></label>
-            <label>Длительность, мин<input type="number" value={svc.durationMinutes} onChange={(e) => (isNew ? setNewService({ ...svc, durationMinutes: e.target.value }) : patchService(idx, { durationMinutes: e.target.value }))} /></label>
-            <label>Порядок<input type="number" value={svc.sortOrder} onChange={(e) => (isNew ? setNewService({ ...svc, sortOrder: e.target.value }) : patchService(idx, { sortOrder: e.target.value }))} /></label>
+            <div className="admin-service-meta">
+              <label>Цена, ₽<input type="number" value={svc.price} onChange={(e) => setField({ price: e.target.value })} /></label>
+              <label>Длительность, мин<input type="number" value={svc.durationMinutes} onChange={(e) => setField({ durationMinutes: e.target.value })} /></label>
+              <label>Порядок<input type="number" value={svc.sortOrder} onChange={(e) => setField({ sortOrder: e.target.value })} /></label>
+              <label className="admin-check">
+                <input type="checkbox" checked={!!svc.isActive} onChange={(e) => setField({ isActive: e.target.checked })} />
+                Активна
+              </label>
+            </div>
           </div>
           <div className="admin-actions admin-service-actions">
             {isNew ? (
@@ -779,63 +794,70 @@ export default function AdminPage() {
         <Link to="/">На сайт</Link>
       </aside>
       <main className="admin-main">
-        <div className="admin-topbar">
-          <button type="button" className="btn btn-logout" onClick={logout}>Выйти</button>
-        </div>
         {loadFailed && <p className="empty-block">Данные отсутствуют</p>}
-
-        {!loadFailed && stats && (
-          <div className="admin-infographic panel">
-            <div className="admin-chart-head">
-              <strong>Показатели</strong>
-              <span className="admin-chart-today">Сегодня: {stats.todayConfirmed} подтв.</span>
-            </div>
-            <div className="admin-chart-months">
-              {monthChart.map((m) => (
-                <div key={m.key} className="admin-chart-month">
-                  <div className="admin-chart-month-meta">
-                    <span className="admin-chart-month-label">{m.label}</span>
-                    <span className="admin-chart-month-vals">{m.count} · {money(m.sum)}</span>
-                  </div>
-                  <div className="admin-chart-tracks">
-                    <div className="admin-bar-track" title="Записи">
-                      <div className="admin-bar-fill" style={{ width: `${m.countPct}%` }} />
-                    </div>
-                    <div className="admin-bar-track admin-bar-track-sum" title="Сумма">
-                      <div className="admin-bar-fill completed" style={{ width: `${m.sumPct}%` }} />
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-            {statusBars.length > 0 && (
-              <div className="admin-chart-status" title="Статусы">
-                {statusBars.map((b) => (
-                  <span
-                    key={b.key}
-                    className={`admin-chart-seg ${b.cls}`}
-                    style={{ flexGrow: b.count, flexBasis: 0 }}
-                    title={`${b.label}: ${b.count}`}
-                  />
-                ))}
-              </div>
-            )}
-            <div className="admin-chart-legend">
-              {statusBars.map((b) => (
-                <span key={b.key} className="admin-chart-legend-item">
-                  <i className={`admin-chart-dot ${b.cls}`} />
-                  {b.label} {b.count}
-                </span>
-              ))}
-              <span className="admin-chart-legend-item muted">
-                отмены/неявки: {(stats.cancelledTotal || 0) + (stats.noShowTotal || 0)}
-              </span>
-            </div>
-          </div>
-        )}
 
         {!loadFailed && tab === 'appointments' && (
           <>
+            {stats && (
+              <div className="admin-infographic panel">
+                <div className="admin-chart-head">
+                  <strong>Показатели</strong>
+                  <span className="admin-chart-today">Сегодня: {stats.todayConfirmed} подтв.</span>
+                </div>
+                <div className="admin-chart-row">
+                  <div className="admin-chart-months">
+                    {monthChart.map((m) => (
+                      <div key={m.key} className="admin-chart-month">
+                        <div className="admin-chart-month-meta">
+                          <span className="admin-chart-month-label">{m.label}</span>
+                          <span className="admin-chart-month-vals">{m.count} · {money(m.sum)}</span>
+                        </div>
+                        <div className="admin-chart-tracks">
+                          <div className="admin-bar-track" title="Записи">
+                            <div className="admin-bar-fill" style={{ width: `${m.countPct}%` }} />
+                          </div>
+                          <div className="admin-bar-track admin-bar-track-sum" title="Сумма">
+                            <div className="admin-bar-fill completed" style={{ width: `${m.sumPct}%` }} />
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="admin-chart-cols" aria-hidden="true">
+                    {monthChart.map((m) => (
+                      <div key={`col-${m.key}`} className="admin-chart-col" title={`${m.label}: ${m.count} · ${money(m.sum)}`}>
+                        <div className="admin-chart-col-count" style={{ height: `${Math.max(8, m.countPct)}%` }} />
+                        <div className="admin-chart-col-sum" style={{ height: `${Math.max(4, m.sumPct * 0.55)}%` }} />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                {statusBars.length > 0 && (
+                  <div className="admin-chart-status" title="Статусы">
+                    {statusBars.map((b) => (
+                      <span
+                        key={b.key}
+                        className={`admin-chart-seg ${b.cls}`}
+                        style={{ flexGrow: b.count, flexBasis: 0 }}
+                        title={`${b.label}: ${b.count}`}
+                      />
+                    ))}
+                  </div>
+                )}
+                <div className="admin-chart-legend">
+                  {statusBars.map((b) => (
+                    <span key={b.key} className="admin-chart-legend-item">
+                      <i className={`admin-chart-dot ${b.cls}`} />
+                      {b.label} {b.count}
+                    </span>
+                  ))}
+                  <span className="admin-chart-legend-item muted">
+                    отмены/неявки: {(stats.cancelledTotal || 0) + (stats.noShowTotal || 0)}
+                  </span>
+                </div>
+              </div>
+            )}
+
             <div className="admin-filters panel">
               <label>
                 С даты
@@ -1044,7 +1066,12 @@ export default function AdminPage() {
                       <button type="button" className="btn btn-ghost btn-xs" onClick={() => resetPassword(c, true)}>
                         Генерация
                       </button>
-                      <button type="button" className="btn btn-ghost btn-xs" onClick={() => resetPassword(c, false)} disabled={!(resetDrafts[c.id] || '').trim()}>
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-xs btn-save-password"
+                        onClick={() => resetPassword(c, false)}
+                        disabled={!(resetDrafts[c.id] || '').trim()}
+                      >
                         Сохранить
                       </button>
                     </div>
@@ -1121,38 +1148,43 @@ export default function AdminPage() {
           !salon ? (
             <p className="empty-block">Данные отсутствуют</p>
           ) : (
-            <form className="form" onSubmit={saveSalon} style={{ maxWidth: 560 }}>
+            <form className="form admin-salon-form" onSubmit={saveSalon}>
               <SectionToolbar title="Настройки салона" />
-              <label>Бренд<input value={salon.brandName} onChange={(e) => setSalon({ ...salon, brandName: e.target.value })} /></label>
-              <label>Название салона<input value={salon.salonName} onChange={(e) => setSalon({ ...salon, salonName: e.target.value })} /></label>
-              <label>Адрес<input value={salon.address} onChange={(e) => setSalon({ ...salon, address: e.target.value })} /></label>
-              <label>Телефон<input value={salon.phone || ''} onChange={(e) => setSalon({ ...salon, phone: e.target.value })} /></label>
-              <label>Instagram (ссылка)<input value={salon.instagramUrl || ''} onChange={(e) => setSalon({ ...salon, instagramUrl: e.target.value })} placeholder="https://www.instagram.com/…" /></label>
-              <label>Telegram (ссылка)<input value={salon.telegramUrl || ''} onChange={(e) => setSalon({ ...salon, telegramUrl: e.target.value })} placeholder="https://t.me/…" /></label>
-              <label>
-                Обо мне
-                <textarea
-                  rows={8}
-                  value={salon.aboutHtml || ''}
-                  onChange={(e) => setSalon({ ...salon, aboutHtml: e.target.value })}
-                  placeholder="Текст блока «Обо мне» (абзацы через пустую строку)"
-                />
-              </label>
-              <div className="admin-about-photo">
-                <span>Фото «Обо мне»</span>
-                {aboutPreview ? (
-                  <img src={aboutPreview} alt="Превью" className="admin-about-preview" />
-                ) : (
-                  <p className="empty-block">Данные отсутствуют</p>
-                )}
-                <label className="btn btn-ghost" style={{ justifySelf: 'start', cursor: 'pointer' }}>
-                  {uploading ? 'Загрузка…' : 'Загрузить фото'}
+              <div className="admin-salon-top">
+                <label className="admin-salon-photo" title={uploading ? 'Загрузка…' : 'Изменить фото'}>
+                  {aboutPreview ? (
+                    <img src={aboutPreview} alt="Фото салона" />
+                  ) : (
+                    <span className="admin-salon-photo-empty">Нет фото</span>
+                  )}
+                  <span className="admin-salon-photo-edit" aria-hidden="true">
+                    <PencilIcon />
+                  </span>
                   <input
                     type="file"
                     accept="image/jpeg,image/png,image/webp"
                     hidden
                     disabled={uploading}
                     onChange={uploadAboutPhoto}
+                  />
+                </label>
+                <div className="admin-salon-fields">
+                  <label>Бренд<input value={salon.brandName} onChange={(e) => setSalon({ ...salon, brandName: e.target.value })} /></label>
+                  <label>Название салона<input value={salon.salonName} onChange={(e) => setSalon({ ...salon, salonName: e.target.value })} /></label>
+                  <label>Телефон<input value={salon.phone || ''} onChange={(e) => setSalon({ ...salon, phone: e.target.value })} /></label>
+                  <label>Instagram (ссылка)<input value={salon.instagramUrl || ''} onChange={(e) => setSalon({ ...salon, instagramUrl: e.target.value })} placeholder="https://www.instagram.com/…" /></label>
+                  <label>Telegram (ссылка)<input value={salon.telegramUrl || ''} onChange={(e) => setSalon({ ...salon, telegramUrl: e.target.value })} placeholder="https://t.me/…" /></label>
+                </div>
+              </div>
+              <div className="admin-salon-below">
+                <label>Адрес<input value={salon.address} onChange={(e) => setSalon({ ...salon, address: e.target.value })} /></label>
+                <label>
+                  Обо мне
+                  <textarea
+                    rows={8}
+                    value={salon.aboutHtml || ''}
+                    onChange={(e) => setSalon({ ...salon, aboutHtml: e.target.value })}
+                    placeholder="Текст блока «Обо мне» (абзацы через пустую строку)"
                   />
                 </label>
               </div>

@@ -112,7 +112,7 @@ public sealed class ReminderHostedService(
         var settings = await db.SalonSettings.AsNoTracking().FirstAsync(ct);
         var template = await telegram.GetTemplateAsync(db, "reminder_2h", ct);
         if (string.IsNullOrWhiteSpace(template))
-            template = "{Имя}, через 2 часа запись на «{Услуга}» — {Дата} в {Время}.";
+            template = "👋 {Имя}, через 2 часа ждём вас!\n\n⏰ Когда: {Дата} в {Время}\n✂️ Услуга: «{Услуга}»\n📍 Где: {НазваниеСалона}\n{Адрес}\n🗺 Карта: {СсылкаНаКарту}";
 
         var frontend = config["App:FrontendPublicUrl"] ?? "";
         foreach (var appt in due)
@@ -187,7 +187,8 @@ public sealed class ReminderHostedService(
                     ["Время"] = lastVisit.ToLocalTime().ToString("HH:mm"),
                     ["НазваниеСалона"] = settings.SalonName,
                     ["Адрес"] = settings.Address,
-                    ["СсылкаНаЗапись"] = $"{frontend.TrimEnd('/')}{settings.BookingUrl}"
+                    ["СсылкаНаЗапись"] = $"{frontend.TrimEnd('/')}{settings.BookingUrl}",
+                    ["СсылкаНаКарту"] = AppointmentsController.BuildMapUrl(settings)
                 };
 
                 var text = TelegramNotifyService.Render(
