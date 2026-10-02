@@ -53,12 +53,18 @@ export default function BookPage() {
   const [slots, setSlots] = useState([]);
   const [slot, setSlot] = useState(null);
   const [salon, setSalon] = useState(null);
+  const [clients, setClients] = useState([]);
+  const [clientId, setClientId] = useState('');
   const [loadFailed, setLoadFailed] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const { auth } = useAuth();
   const { show } = useModal();
   const navigate = useNavigate();
-  const canBook = auth?.role === 'Client';
+
+  const isGuest = !auth;
+  const isAdmin = auth?.role === 'Admin';
+  const isClient = auth?.role === 'Client';
+  const canBook = isClient || isAdmin;
 
   useEffect(() => {
     Promise.all([api.get('/services'), api.get('/salon')])
@@ -76,10 +82,22 @@ export default function BookPage() {
   }, []);
 
   useEffect(() => {
+    if (!isAdmin) {
+      setClients([]);
+      setClientId('');
+      return;
+    }
+    api.get('/admin/clients')
+      .then((r) => setClients(r.data || []))
+      .catch(() => setClients([]));
+  }, [isAdmin]);
+
+  useEffect(() => {
     if (!canBook) {
       setStep(1);
       setService(null);
       setSlot(null);
+      setClientId('');
     }
   }, [canBook]);
 
@@ -95,15 +113,33 @@ export default function BookPage() {
     [slots],
   );
 
+  const selectedClient = useMemo(
+    () => clients.find((c) => String(c.id) === String(clientId)),
+    [clients, clientId],
+  );
+
   const confirm = async () => {
+    if (isAdmin && !clientId) {
+      show({ title: 'Выберите клиента', message: 'Для записи от имени администратора нужен клиент.' });
+      return;
+    }
     try {
-      const { data } = await api.post('/appointments', {
-        serviceId: service.id,
-        startAtUtc: slot,
-      });
+      const { data } = isAdmin
+        ? await api.post('/appointments/admin', {
+            clientId,
+            serviceId: service.id,
+            startAtUtc: slot,
+          })
+        : await api.post('/appointments', {
+            serviceId: service.id,
+            startAtUtc: slot,
+          });
       show({
         title: 'Запись подтверждена',
         details: [
+          ...(isAdmin && selectedClient
+            ? [`Клиент: ${selectedClient.name} · ${selectedClient.phone}`]
+            : []),
           `Услуга: ${data.serviceName}`,
           `Дата: ${new Date(data.startAtUtc).toLocaleDateString('ru-RU')}`,
           `Время: ${new Date(data.startAtUtc).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}`,
@@ -130,13 +166,16 @@ export default function BookPage() {
               URL.revokeObjectURL(url);
             },
           },
-          { label: 'В личный кабинет', onClick: () => navigate('/cabinet') },
+          isAdmin
+            ? { label: 'В админку', onClick: () => navigate('/admin') }
+            : { label: 'В личный кабинет', onClick: () => navigate('/cabinet') },
           { label: 'На главную', onClick: () => navigate('/#top') },
         ],
       });
       setStep(1);
       setService(null);
       setSlot(null);
+      setClientId('');
     } catch (e) {
       show({ title: 'Не удалось записаться', message: apiErrorMessage(e) });
     }
@@ -168,8 +207,30 @@ export default function BookPage() {
 
         <div className="booking-stage reveal-child" style={{ '--reveal-delay': '0.12s' }}>
           <div className="booking-stage-body">
-            {!canBook && (
+            {isGuest && (
               <ServiceList services={services} selectable={false} />
+            )}
+
+            {isAdmin && canBook && (
+              <div className="panel panel-admin-client" style={{ marginBottom: '1rem' }}>
+                <div className="panel-label">Клиент</div>
+                <p className="muted" style={{ margin: '0 0 .75rem' }}>
+                  Вы вошли как администратор. Выберите клиента для записи или{' '}
+                  <Link to="/admin">откройте админку</Link>.
+                </p>
+                <label className="form">
+                  <span className="sr-only">Клиент</span>
+                  <select value={clientId} onChange={(e) => setClientId(e.target.value)}>
+                    <option value="">Выберите клиента</option>
+                    {clients.map((c) => (
+                      <option key={c.id} value={c.id}>{c.name} · {c.phone}</option>
+                    ))}
+                  </select>
+                </label>
+                {clients.length === 0 && (
+                  <p className="muted" style={{ marginTop: '.75rem' }}>Клиенты не найдены.</p>
+                )}
+              </div>
             )}
 
             {canBook && step === 1 && (
@@ -216,6 +277,9 @@ export default function BookPage() {
               <div className="panel panel-confirm">
                 <div className="panel-label">Подтверждение</div>
                 <div className="details">
+                  {isAdmin && selectedClient && (
+                    <div>Клиент: {selectedClient.name} · {selectedClient.phone}</div>
+                  )}
                   <div>Услуга: {service?.name}</div>
                   <div>Дата: {new Date(slot).toLocaleDateString('ru-RU')}</div>
                   <div>Время: {new Date(slot).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}</div>
@@ -227,14 +291,21 @@ export default function BookPage() {
           </div>
 
           <div className="booking-stage-actions">
-            {!canBook && (
+            {isGuest && (
               <>
                 <Link className="btn btn-primary btn-cta" to="/login">Войти</Link>
                 <Link className="btn btn-ghost" to="/register">Зарегистрироваться</Link>
               </>
             )}
             {canBook && step === 1 && (
-              <button type="button" className="btn btn-primary btn-cta" disabled={!service} onClick={() => setStep(2)}>Далее</button>
+              <button
+                type="button"
+                className="btn btn-primary btn-cta"
+                disabled={!service || (isAdmin && !clientId)}
+                onClick={() => setStep(2)}
+              >
+                Далее
+              </button>
             )}
             {canBook && step === 2 && (
               <>
@@ -245,7 +316,14 @@ export default function BookPage() {
             {canBook && step === 3 && (
               <>
                 <button type="button" className="btn btn-ghost" onClick={() => setStep(2)}>Назад</button>
-                <button type="button" className="btn btn-primary btn-cta" onClick={confirm}>Подтвердить запись</button>
+                <button
+                  type="button"
+                  className="btn btn-primary btn-cta"
+                  disabled={isAdmin && !clientId}
+                  onClick={confirm}
+                >
+                  Подтвердить запись
+                </button>
               </>
             )}
           </div>

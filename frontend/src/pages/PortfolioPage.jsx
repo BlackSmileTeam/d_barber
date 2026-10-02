@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import api, { mediaUrl } from '../services/api';
 
 export default function PortfolioPage() {
@@ -39,9 +40,11 @@ export default function PortfolioPage() {
       if (e.key === 'ArrowRight') stepLightbox(1);
     };
     document.body.style.overflow = 'hidden';
+    document.body.classList.add('lightbox-open');
     window.addEventListener('keydown', onKey);
     return () => {
       document.body.style.overflow = '';
+      document.body.classList.remove('lightbox-open');
       window.removeEventListener('keydown', onKey);
     };
   }, [lightboxIndex, closeLightbox, stepLightbox]);
@@ -55,6 +58,61 @@ export default function PortfolioPage() {
 
   const empty = failed || (loaded && items.length === 0);
   const lightbox = lightboxIndex != null ? items[lightboxIndex] : null;
+
+  const lightboxNode = lightbox && (
+    <div className="lightbox-backdrop" onClick={closeLightbox} role="presentation">
+      <div
+        className="lightbox"
+        onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-label={lightbox.title}
+      >
+        <button type="button" className="lightbox-close" onClick={closeLightbox} aria-label="Закрыть">
+          <span aria-hidden="true">×</span>
+          <span className="lightbox-close-label">Закрыть</span>
+        </button>
+
+        {items.length > 1 && (
+          <button
+            type="button"
+            className="lightbox-nav lightbox-prev"
+            onClick={() => stepLightbox(-1)}
+            aria-label="Предыдущая работа"
+          >
+            ‹
+          </button>
+        )}
+
+        <div className="lightbox-stage">
+          <img src={mediaUrl(lightbox.imageUrl)} alt={lightbox.title} />
+        </div>
+
+        {items.length > 1 && (
+          <button
+            type="button"
+            className="lightbox-nav lightbox-next"
+            onClick={() => stepLightbox(1)}
+            aria-label="Следующая работа"
+          >
+            ›
+          </button>
+        )}
+
+        <div className="lightbox-meta">
+          <strong>{lightbox.title}</strong>
+          {(lightbox.serviceName || lightbox.description) && (
+            <p>{lightbox.serviceName || lightbox.description}</p>
+          )}
+          {items.length > 1 && (
+            <span className="lightbox-counter">
+              {lightboxIndex + 1} / {items.length}
+            </span>
+          )}
+        </div>
+      </div>
+    </div>
+  );
 
   return (
     <section className="section section-portfolio reveal" id="portfolio">
@@ -99,60 +157,7 @@ export default function PortfolioPage() {
         )}
       </div>
 
-      {lightbox && (
-        <div className="lightbox-backdrop" onClick={closeLightbox} role="presentation">
-          <div
-            className="lightbox"
-            onClick={(e) => e.stopPropagation()}
-            role="dialog"
-            aria-modal="true"
-            aria-label={lightbox.title}
-          >
-            <button type="button" className="lightbox-close" onClick={closeLightbox} aria-label="Закрыть">
-              <span aria-hidden="true">×</span>
-              <span className="lightbox-close-label">Закрыть</span>
-            </button>
-
-            {items.length > 1 && (
-              <button
-                type="button"
-                className="lightbox-nav lightbox-prev"
-                onClick={() => stepLightbox(-1)}
-                aria-label="Предыдущая работа"
-              >
-                ‹
-              </button>
-            )}
-
-            <div className="lightbox-stage">
-              <img src={mediaUrl(lightbox.imageUrl)} alt={lightbox.title} />
-            </div>
-
-            {items.length > 1 && (
-              <button
-                type="button"
-                className="lightbox-nav lightbox-next"
-                onClick={() => stepLightbox(1)}
-                aria-label="Следующая работа"
-              >
-                ›
-              </button>
-            )}
-
-            <div className="lightbox-meta">
-              <strong>{lightbox.title}</strong>
-              {(lightbox.serviceName || lightbox.description) && (
-                <p>{lightbox.serviceName || lightbox.description}</p>
-              )}
-              {items.length > 1 && (
-                <span className="lightbox-counter">
-                  {lightboxIndex + 1} / {items.length}
-                </span>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
+      {lightboxNode ? createPortal(lightboxNode, document.body) : null}
     </section>
   );
 }

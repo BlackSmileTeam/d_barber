@@ -812,14 +812,23 @@ body:has(main.landing) .site-header {
 .portfolio-item .cap { padding: .75rem 0; color: var(--muted); font-size: .92rem; }
 .portfolio-item .cap strong { color: var(--text); display: block; }
 
+/* Portaled to body — must sit above sticky .site-header (z-index: 40) */
+body.lightbox-open .site-header {
+  visibility: hidden;
+  pointer-events: none;
+}
 .lightbox-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 200;
+  z-index: 1000;
+  width: 100vw;
+  height: 100vh;
+  height: 100dvh;
   background: rgba(8, 10, 14, 0.94);
   display: grid;
   place-items: center;
   padding: 0;
+  margin: 0;
   animation: fade .2s ease;
 }
 .lightbox {
@@ -828,10 +837,12 @@ body:has(main.landing) .site-header {
   width: 100%;
   height: 100%;
   max-width: none;
+  max-height: none;
   display: grid;
   grid-template-rows: 1fr auto;
   align-items: center;
   justify-items: center;
+  justify-content: center;
   padding: 3.25rem 4.5rem 1.5rem;
   box-sizing: border-box;
 }
@@ -844,7 +855,7 @@ body:has(main.landing) .site-header {
 }
 .lightbox-stage img {
   max-width: min(1100px, 92vw);
-  max-height: calc(100vh - 9rem);
+  max-height: min(calc(100dvh - 9rem), calc(100vh - 9rem));
   width: auto;
   height: auto;
   object-fit: contain;
@@ -856,6 +867,7 @@ body:has(main.landing) .site-header {
   color: #f4f1ea;
   max-width: min(640px, 92vw);
   padding-top: .85rem;
+  justify-self: center;
 }
 .lightbox-meta strong {
   display: block;
@@ -942,7 +954,7 @@ body:has(main.landing) .site-header {
   .lightbox-next { right: .35rem; }
   .lightbox-close-label { display: none; }
   .lightbox-stage img {
-    max-height: calc(100vh - 10rem);
+    max-height: min(calc(100dvh - 10rem), calc(100vh - 10rem));
   }
 }
 
