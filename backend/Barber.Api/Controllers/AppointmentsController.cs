@@ -140,6 +140,43 @@ public class AppointmentsController(
     }
 
     [Authorize(Roles = "Admin")]
+    [HttpPost("admin")]
+    public async Task<ActionResult<AppointmentDto>> AdminCreate(AdminCreateAppointmentDto dto, CancellationToken ct)
+    {
+        var client = await db.Clients.FirstOrDefaultAsync(c => c.Id == dto.ClientId, ct);
+        if (client is null)
+            return BadRequest(new { message = "Клиент не найден" });
+
+        var service = await db.Services.FirstOrDefaultAsync(s => s.Id == dto.ServiceId && s.IsActive, ct);
+        if (service is null)
+            return BadRequest(new { message = "Услуга не найдена" });
+
+        var start = DateTime.SpecifyKind(dto.StartAtUtc, DateTimeKind.Utc);
+        var day = DateOnly.FromDateTime(start);
+        var available = await slots.GetAvailableSlotsAsync(service.Id, day, ct);
+        if (!available.Any(s => Math.Abs((s - start).TotalSeconds) < 1))
+            return Conflict(new { message = "Выбранное время уже занято. Выберите другой слот." });
+
+        var entity = new Appointment
+        {
+            Id = Guid.NewGuid(),
+            ClientId = client.Id,
+            ServiceId = service.Id,
+            StartAtUtc = start,
+            EndAtUtc = start.AddMinutes(service.DurationMinutes),
+            Status = AppointmentStatus.Confirmed
+        };
+        db.Appointments.Add(entity);
+        await db.SaveChangesAsync(ct);
+
+        await db.Entry(entity).Reference(a => a.Client).LoadAsync(ct);
+        await db.Entry(entity).Reference(a => a.Service).LoadAsync(ct);
+        await NotifyBookingAsync(entity, ct);
+
+        return Ok(Map(entity));
+    }
+
+    [Authorize(Roles = "Admin")]
     [HttpPost("{id:guid}/admin-status")]
     public async Task<ActionResult<AppointmentDto>> AdminSetStatus(Guid id, AdminSetAppointmentStatusDto dto, CancellationToken ct)
     {

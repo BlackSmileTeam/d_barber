@@ -61,6 +61,44 @@ const STATUS_OPTIONS = [
 
 const statusLabel = (s) => STATUS_LABELS[s] || s;
 
+const WEEKDAYS_RU = ['пн', 'вт', 'ср', 'чт', 'пт', 'сб', 'вс'];
+
+const toLocalYmd = (d) => {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+};
+
+const phoneDigits = (phone) => String(phone || '').replace(/\D/g, '');
+
+const telegramPhoneHref = (phone) => {
+  const digits = phoneDigits(phone);
+  return digits ? `tg://resolve?phone=${digits}` : null;
+};
+
+const openTelegramByPhone = (phone) => {
+  const href = telegramPhoneHref(phone);
+  if (!href) return;
+  const opened = window.open(href, '_blank', 'noopener,noreferrer');
+  if (!opened) {
+    window.location.href = href;
+  }
+};
+
+const buildDonutSegments = (bars) => {
+  const total = Math.max(1, bars.reduce((s, b) => s + b.count, 0));
+  const r = 36;
+  const c = 2 * Math.PI * r;
+  let offset = 0;
+  return bars.map((b) => {
+    const len = (b.count / total) * c;
+    const seg = { ...b, dash: `${len} ${c - len}`, offset: -offset };
+    offset += len;
+    return seg;
+  });
+};
+
 const intervalLabel = (type, days) => {
   switch (type) {
     case 'Monthly': return 'Раз в месяц после визита';
@@ -132,11 +170,17 @@ export default function AdminPage() {
   const [newTemplate, setNewTemplate] = useState(emptyTemplate);
   const [newPortfolio, setNewPortfolio] = useState(emptyPortfolio);
   const [resetDrafts, setResetDrafts] = useState({});
-  const [filterDateFrom, setFilterDateFrom] = useState('');
-  const [filterDateTo, setFilterDateTo] = useState('');
   const [filterClient, setFilterClient] = useState('');
   const [filterService, setFilterService] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
+  const [calMonth, setCalMonth] = useState(() => {
+    const n = new Date();
+    return new Date(n.getFullYear(), n.getMonth(), 1);
+  });
+  const [selectedDay, setSelectedDay] = useState(() => toLocalYmd(new Date()));
+  const [createDraft, setCreateDraft] = useState({ clientId: '', serviceId: '', slot: '', slots: [] });
+  const [showCreate, setShowCreate] = useState(false);
+  const [createBusy, setCreateBusy] = useState(false);
   const [reschedule, setReschedule] = useState(null); // { id, serviceId, date, slots, slot }
   const [statusBusy, setStatusBusy] = useState(null);
   const { show } = useModal();
@@ -200,22 +244,13 @@ export default function AdminPage() {
         const hay = `${a.clientName || ''} ${a.clientPhone || ''}`.toLowerCase();
         if (!hay.includes(clientQ)) return false;
       }
-      const start = new Date(a.startAtUtc);
-      if (filterDateFrom) {
-        const from = new Date(`${filterDateFrom}T00:00:00`);
-        if (start < from) return false;
-      }
-      if (filterDateTo) {
-        const to = new Date(`${filterDateTo}T23:59:59.999`);
-        if (start > to) return false;
-      }
       return true;
     });
-  }, [appointments, filterDateFrom, filterDateTo, filterClient, filterService, filterStatus]);
+  }, [appointments, filterClient, filterService, filterStatus]);
 
   const monthChart = useMemo(() => {
     if (!stats) return [];
-    const rows = [
+    return [
       {
         key: 'prev',
         label: stats.previousMonth?.label || 'Прошлый',
@@ -229,13 +264,6 @@ export default function AdminPage() {
         sum: Number(stats.currentMonth?.sum || 0),
       },
     ];
-    const maxCount = Math.max(1, ...rows.map((r) => r.count));
-    const maxSum = Math.max(1, ...rows.map((r) => r.sum));
-    return rows.map((r) => ({
-      ...r,
-      countPct: Math.round((r.count / maxCount) * 100),
-      sumPct: Math.round((r.sum / maxSum) * 100),
-    }));
   }, [stats]);
 
   const statusBars = useMemo(() => {
@@ -252,6 +280,57 @@ export default function AdminPage() {
       .filter((b) => b.count > 0)
       .sort((a, b) => b.count - a.count);
   }, [stats]);
+
+  const donutSegments = useMemo(() => buildDonutSegments(statusBars), [statusBars]);
+  const donutTotal = useMemo(
+    () => statusBars.reduce((s, b) => s + b.count, 0),
+    [statusBars],
+  );
+
+  const appointmentsByDay = useMemo(() => {
+    const map = new Map();
+    for (const a of filteredAppointments) {
+      const key = toLocalYmd(new Date(a.startAtUtc));
+      if (!map.has(key)) map.set(key, []);
+      map.get(key).push(a);
+    }
+    for (const list of map.values()) {
+      list.sort((x, y) => new Date(x.startAtUtc) - new Date(y.startAtUtc));
+    }
+    return map;
+  }, [filteredAppointments]);
+
+  const calendarCells = useMemo(() => {
+    const year = calMonth.getFullYear();
+    const month = calMonth.getMonth();
+    const first = new Date(year, month, 1);
+    const startPad = (first.getDay() + 6) % 7; // Monday-first
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+    const prevDays = new Date(year, month, 0).getDate();
+    const cells = [];
+    for (let i = 0; i < startPad; i += 1) {
+      const day = prevDays - startPad + i + 1;
+      const date = new Date(year, month - 1, day);
+      cells.push({ key: toLocalYmd(date), date, inMonth: false });
+    }
+    for (let d = 1; d <= daysInMonth; d += 1) {
+      const date = new Date(year, month, d);
+      cells.push({ key: toLocalYmd(date), date, inMonth: true });
+    }
+    while (cells.length % 7 !== 0) {
+      const last = cells[cells.length - 1].date;
+      const date = new Date(last.getFullYear(), last.getMonth(), last.getDate() + 1);
+      cells.push({ key: toLocalYmd(date), date, inMonth: false });
+    }
+    return cells;
+  }, [calMonth]);
+
+  const dayAppointments = useMemo(
+    () => appointmentsByDay.get(selectedDay) || [],
+    [appointmentsByDay, selectedDay],
+  );
+
+  const todayYmd = toLocalYmd(new Date());
 
   if (!auth || auth.role !== 'Admin') {
     return <Navigate to="/admin/login" replace />;
@@ -640,6 +719,65 @@ export default function AdminPage() {
     }
   };
 
+  const loadCreateSlots = async (serviceId, date) => {
+    if (!serviceId || !date) {
+      setCreateDraft((prev) => ({ ...prev, serviceId: serviceId || prev.serviceId, slots: [], slot: '' }));
+      return;
+    }
+    try {
+      const { data } = await api.get('/appointments/slots', { params: { serviceId, date } });
+      setCreateDraft((prev) => ({
+        ...prev,
+        serviceId,
+        slots: data.slotsUtc || data.SlotsUtc || [],
+        slot: '',
+      }));
+    } catch (err) {
+      show({ title: 'Ошибка', message: apiErrorMessage(err) });
+      setCreateDraft((prev) => ({ ...prev, serviceId, slots: [], slot: '' }));
+    }
+  };
+
+  const openCreateForDay = () => {
+    setShowCreate(true);
+    setCreateDraft({ clientId: '', serviceId: '', slot: '', slots: [] });
+  };
+
+  const createAppointment = async () => {
+    if (!createDraft.clientId || !createDraft.serviceId || !createDraft.slot) return;
+    setCreateBusy(true);
+    try {
+      await api.post('/appointments/admin', {
+        clientId: createDraft.clientId,
+        serviceId: createDraft.serviceId,
+        startAtUtc: createDraft.slot,
+      });
+      setShowCreate(false);
+      setCreateDraft({ clientId: '', serviceId: '', slot: '', slots: [] });
+      show({ title: 'Запись создана', message: 'Клиент записан на выбранное время.' });
+      reload();
+    } catch (err) {
+      show({ title: 'Ошибка', message: apiErrorMessage(err) });
+    } finally {
+      setCreateBusy(false);
+    }
+  };
+
+  const shiftCalMonth = (delta) => {
+    setCalMonth((prev) => new Date(prev.getFullYear(), prev.getMonth() + delta, 1));
+  };
+
+  const selectCalendarDay = (ymd) => {
+    setSelectedDay(ymd);
+    setShowCreate(false);
+    setCreateDraft({ clientId: '', serviceId: '', slot: '', slots: [] });
+    const [y, m] = ymd.split('-').map(Number);
+    setCalMonth((prev) => {
+      if (prev.getFullYear() === y && prev.getMonth() === m - 1) return prev;
+      return new Date(y, m - 1, 1);
+    });
+  };
+
   const renderTriggerFields = (t, onChange) => (
     <>
       <label>
@@ -697,7 +835,7 @@ export default function AdminPage() {
             <label className="admin-service-desc">
               Описание
               <textarea
-                rows={3}
+                rows={6}
                 value={svc.description || ''}
                 onChange={(e) => setField({ description: e.target.value })}
               />
@@ -810,69 +948,60 @@ export default function AdminPage() {
                   <strong>Показатели</strong>
                   <span className="admin-chart-today">Сегодня: {stats.todayConfirmed} подтв.</span>
                 </div>
-                <div className="admin-chart-row">
-                  <div className="admin-chart-months">
+                <div className="admin-donut-wrap">
+                  <svg className="admin-donut" viewBox="0 0 100 100" role="img" aria-label="Распределение статусов">
+                    <circle cx="50" cy="50" r="36" fill="none" stroke="var(--bg-soft)" strokeWidth="14" />
+                    {donutSegments.length === 0 ? (
+                      <circle cx="50" cy="50" r="36" fill="none" stroke="var(--line)" strokeWidth="14" />
+                    ) : (
+                      donutSegments.map((seg) => (
+                        <circle
+                          key={seg.key}
+                          cx="50"
+                          cy="50"
+                          r="36"
+                          fill="none"
+                          strokeWidth="14"
+                          strokeDasharray={seg.dash}
+                          strokeDashoffset={seg.offset}
+                          transform="rotate(-90 50 50)"
+                          style={{
+                            stroke: seg.cls === 'confirmed' ? 'var(--ok)'
+                              : seg.cls === 'cancelled' || seg.cls === 'noshow' ? 'var(--danger)'
+                                : seg.cls === 'rescheduled' ? 'var(--warn)'
+                                  : 'var(--copper)',
+                          }}
+                        />
+                      ))
+                    )}
+                    <circle className="admin-donut-center" cx="50" cy="50" r="26" />
+                    <text className="admin-donut-value" x="50" y="48">{donutTotal}</text>
+                    <text className="admin-donut-label" x="50" y="62">записей</text>
+                  </svg>
+                  <div className="admin-donut-side">
                     {monthChart.map((m) => (
-                      <div key={m.key} className="admin-chart-month">
-                        <div className="admin-chart-month-meta">
-                          <span className="admin-chart-month-label">{m.label}</span>
-                          <span className="admin-chart-month-vals">{m.count} · {money(m.sum)}</span>
-                        </div>
-                        <div className="admin-chart-tracks">
-                          <div className="admin-bar-track" title="Записи">
-                            <div className="admin-bar-fill" style={{ width: `${m.countPct}%` }} />
-                          </div>
-                          <div className="admin-bar-track admin-bar-track-sum" title="Сумма">
-                            <div className="admin-bar-fill completed" style={{ width: `${m.sumPct}%` }} />
-                          </div>
-                        </div>
+                      <div key={m.key} className="admin-donut-month">
+                        <span>{m.label}</span>
+                        <strong>{m.count} · {money(m.sum)}</strong>
                       </div>
                     ))}
+                    <div className="admin-chart-legend">
+                      {statusBars.map((b) => (
+                        <span key={b.key} className="admin-chart-legend-item">
+                          <i className={`admin-chart-dot ${b.cls}`} />
+                          {b.label} {b.count}
+                        </span>
+                      ))}
+                      <span className="admin-chart-legend-item muted">
+                        отмены/неявки: {(stats.cancelledTotal || 0) + (stats.noShowTotal || 0)}
+                      </span>
+                    </div>
                   </div>
-                  <div className="admin-chart-cols" aria-hidden="true">
-                    {monthChart.map((m) => (
-                      <div key={`col-${m.key}`} className="admin-chart-col" title={`${m.label}: ${m.count} · ${money(m.sum)}`}>
-                        <div className="admin-chart-col-count" style={{ height: `${Math.max(8, m.countPct)}%` }} />
-                        <div className="admin-chart-col-sum" style={{ height: `${Math.max(4, m.sumPct * 0.55)}%` }} />
-                      </div>
-                    ))}
-                  </div>
-                </div>
-                {statusBars.length > 0 && (
-                  <div className="admin-chart-status" title="Статусы">
-                    {statusBars.map((b) => (
-                      <span
-                        key={b.key}
-                        className={`admin-chart-seg ${b.cls}`}
-                        style={{ flexGrow: b.count, flexBasis: 0 }}
-                        title={`${b.label}: ${b.count}`}
-                      />
-                    ))}
-                  </div>
-                )}
-                <div className="admin-chart-legend">
-                  {statusBars.map((b) => (
-                    <span key={b.key} className="admin-chart-legend-item">
-                      <i className={`admin-chart-dot ${b.cls}`} />
-                      {b.label} {b.count}
-                    </span>
-                  ))}
-                  <span className="admin-chart-legend-item muted">
-                    отмены/неявки: {(stats.cancelledTotal || 0) + (stats.noShowTotal || 0)}
-                  </span>
                 </div>
               </div>
             )}
 
             <div className="admin-filters panel">
-              <label>
-                С даты
-                <input type="date" value={filterDateFrom} onChange={(e) => setFilterDateFrom(e.target.value)} />
-              </label>
-              <label>
-                По дату
-                <input type="date" value={filterDateTo} onChange={(e) => setFilterDateTo(e.target.value)} />
-              </label>
               <label>
                 Клиент
                 <input
@@ -899,13 +1028,11 @@ export default function AdminPage() {
                   ))}
                 </select>
               </label>
-              {(filterDateFrom || filterDateTo || filterClient || filterService || filterStatus) && (
+              {(filterClient || filterService || filterStatus) && (
                 <button
                   type="button"
                   className="btn btn-ghost btn-xs"
                   onClick={() => {
-                    setFilterDateFrom('');
-                    setFilterDateTo('');
                     setFilterClient('');
                     setFilterService('');
                     setFilterStatus('');
@@ -957,64 +1084,187 @@ export default function AdminPage() {
               </div>
             )}
 
-            {filteredAppointments.length === 0 ? (
-              <p className="empty-block">Данные отсутствуют</p>
-            ) : (
-              <table className="table">
-                <thead>
-                  <tr>
-                    <th>Дата</th><th>Клиент</th><th>Услуга</th><th>Статус</th><th>Действия</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredAppointments.map((a) => (
-                    <tr key={a.id}>
-                      <td>{new Date(a.startAtUtc).toLocaleString('ru-RU')}</td>
-                      <td>
-                        {a.clientName}
-                        <br />
-                        <span style={{ color: 'var(--muted)' }}>{a.clientPhone}</span>
-                      </td>
-                      <td>
-                        {a.serviceName}
-                        <br />
-                        <span style={{ color: 'var(--muted)' }}>{money(a.price)}</span>
-                      </td>
-                      <td><span className={`badge ${statusClass(a.status)}`}>{statusLabel(a.status)}</span></td>
-                      <td>
-                        {(() => {
-                          const actions = appointmentActions(a);
-                          if (actions.length === 0) return <span className="admin-key">—</span>;
-                          return (
-                            <details className="admin-actions-menu">
-                              <summary className="btn btn-ghost btn-xs" disabled={statusBusy === a.id}>
-                                Действия
-                              </summary>
-                              <div className="admin-actions-dropdown">
-                                {actions.map((item) => (
-                                  <button
-                                    key={item.key}
-                                    type="button"
-                                    className={`admin-actions-item${item.danger ? ' danger' : ''}`}
-                                    disabled={statusBusy === a.id}
-                                    onClick={(e) => {
-                                      e.currentTarget.closest('details')?.removeAttribute('open');
-                                      item.run();
-                                    }}
-                                  >
-                                    {item.label}
-                                  </button>
-                                ))}
-                              </div>
-                            </details>
-                          );
-                        })()}
-                      </td>
-                    </tr>
+            <div className="admin-calendar-wrap">
+              <div className="panel admin-calendar">
+                <div className="admin-cal-head">
+                  <h2 className="admin-cal-title">
+                    {calMonth.toLocaleDateString('ru-RU', { month: 'long', year: 'numeric' })}
+                  </h2>
+                  <div className="admin-cal-nav">
+                    <button type="button" className="btn btn-ghost btn-xs" onClick={() => shiftCalMonth(-1)} aria-label="Предыдущий месяц">‹</button>
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-xs"
+                      onClick={() => {
+                        const n = new Date();
+                        setCalMonth(new Date(n.getFullYear(), n.getMonth(), 1));
+                        setSelectedDay(toLocalYmd(n));
+                      }}
+                    >
+                      Сегодня
+                    </button>
+                    <button type="button" className="btn btn-ghost btn-xs" onClick={() => shiftCalMonth(1)} aria-label="Следующий месяц">›</button>
+                  </div>
+                </div>
+                <div className="admin-cal-weekdays">
+                  {WEEKDAYS_RU.map((d) => (
+                    <span key={d} className="admin-cal-weekday">{d}</span>
                   ))}
-                </tbody>
-              </table>
-            )}
+                </div>
+                <div className="admin-cal-grid">
+                  {calendarCells.map((cell) => {
+                    const dayItems = appointmentsByDay.get(cell.key) || [];
+                    const dots = dayItems.slice(0, 4);
+                    return (
+                      <button
+                        key={cell.key}
+                        type="button"
+                        className={[
+                          'admin-cal-day',
+                          cell.inMonth ? '' : 'muted',
+                          cell.key === selectedDay ? 'selected' : '',
+                          cell.key === todayYmd ? 'today' : '',
+                        ].filter(Boolean).join(' ')}
+                        onClick={() => selectCalendarDay(cell.key)}
+                      >
+                        <span className="admin-cal-day-num">{cell.date.getDate()}</span>
+                        {dayItems.length > 0 && (
+                          <>
+                            <span className="admin-cal-dots">
+                              {dots.map((a) => (
+                                <i key={a.id} className={`admin-cal-dot ${statusClass(a.status)}`} />
+                              ))}
+                            </span>
+                            <span className="admin-cal-count">{dayItems.length}</span>
+                          </>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="panel admin-day-panel">
+                <div className="admin-day-panel-head">
+                  <strong className="admin-card-title">
+                    {new Date(`${selectedDay}T12:00:00`).toLocaleDateString('ru-RU', {
+                      weekday: 'long', day: 'numeric', month: 'long',
+                    })}
+                  </strong>
+                  <button type="button" className="btn btn-primary btn-xs" onClick={openCreateForDay}>
+                    Создать запись
+                  </button>
+                </div>
+
+                {dayAppointments.length === 0 ? (
+                  <p className="empty-block" style={{ margin: 0 }}>На этот день записей нет</p>
+                ) : (
+                  <div className="admin-day-list">
+                    {dayAppointments.map((a) => {
+                      const actions = appointmentActions(a);
+                      return (
+                        <div key={a.id} className="admin-day-item">
+                          <div className="admin-day-item-top">
+                            <div>
+                              <strong>
+                                {new Date(a.startAtUtc).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}
+                                {' · '}
+                                {a.clientName}
+                              </strong>
+                              <p className="admin-day-item-meta">
+                                {a.clientPhone} · {a.serviceName} · {money(a.price)}
+                              </p>
+                            </div>
+                            <span className={`badge ${statusClass(a.status)}`}>{statusLabel(a.status)}</span>
+                          </div>
+                          {actions.length > 0 && (
+                            <div className="admin-actions">
+                              {actions.map((item) => (
+                                <button
+                                  key={item.key}
+                                  type="button"
+                                  className="btn btn-ghost btn-xs"
+                                  style={item.danger ? { color: 'var(--danger)', borderColor: 'var(--danger)' } : undefined}
+                                  disabled={statusBusy === a.id}
+                                  onClick={item.run}
+                                >
+                                  {item.label === 'Отменено' ? 'Удалить' : item.label}
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {showCreate && (
+                  <div className="admin-day-create form">
+                    <strong className="admin-card-title">Новая запись</strong>
+                    <label>
+                      Клиент
+                      <select
+                        value={createDraft.clientId}
+                        onChange={(e) => setCreateDraft((prev) => ({ ...prev, clientId: e.target.value }))}
+                      >
+                        <option value="">Выберите клиента</option>
+                        {clients.map((c) => (
+                          <option key={c.id} value={c.id}>{c.name} · {c.phone}</option>
+                        ))}
+                      </select>
+                    </label>
+                    <label>
+                      Услуга
+                      <select
+                        value={createDraft.serviceId}
+                        onChange={(e) => loadCreateSlots(e.target.value, selectedDay)}
+                      >
+                        <option value="">Выберите услугу</option>
+                        {services.filter((s) => s.isActive).map((s) => (
+                          <option key={s.id} value={s.id}>{s.name}</option>
+                        ))}
+                      </select>
+                    </label>
+                    <label>
+                      Время
+                      <select
+                        value={createDraft.slot}
+                        onChange={(e) => setCreateDraft((prev) => ({ ...prev, slot: e.target.value }))}
+                        disabled={!createDraft.serviceId}
+                      >
+                        <option value="">Выберите слот</option>
+                        {(createDraft.slots || []).map((s) => (
+                          <option key={s} value={s}>
+                            {new Date(s).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <div className="admin-actions">
+                      <button
+                        type="button"
+                        className="btn btn-primary"
+                        disabled={createBusy || !createDraft.clientId || !createDraft.serviceId || !createDraft.slot}
+                        onClick={createAppointment}
+                      >
+                        Записать
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-ghost"
+                        onClick={() => {
+                          setShowCreate(false);
+                          setCreateDraft({ clientId: '', serviceId: '', slot: '', slots: [] });
+                        }}
+                      >
+                        Отмена
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
           </>
         )}
 
@@ -1049,16 +1299,29 @@ export default function AdminPage() {
                       <div className="admin-client-line">
                         <strong>{c.name}</strong>
                         <span className="admin-key">{c.phone}</span>
-                        {c.telegramLinked && (
+                        {phoneDigits(c.phone) ? (
+                          <a
+                            className="admin-tg-badge"
+                            href={telegramPhoneHref(c.phone)}
+                            title="Открыть в Telegram"
+                            aria-label="Открыть в Telegram"
+                            onClick={(e) => {
+                              e.preventDefault();
+                              openTelegramByPhone(c.phone);
+                            }}
+                          >
+                            <TgIcon />
+                          </a>
+                        ) : c.telegramLinked ? (
                           <span className="admin-tg-badge" title="Telegram привязан" aria-label="Telegram привязан">
                             <TgIcon />
                           </span>
-                        )}
+                        ) : null}
                       </div>
                       <p className="admin-client-meta">
                         {new Date(c.createdAtUtc).toLocaleDateString('ru-RU')}
                         {c.lastVisitAtUtc
-                          ? ` · визит ${new Date(c.lastVisitAtUtc).toLocaleDateString('ru-RU')}`
+                          ? ` · Последний визит: ${new Date(c.lastVisitAtUtc).toLocaleDateString('ru-RU')}`
                           : ' · без визитов'}
                       </p>
                     </div>
@@ -1089,7 +1352,7 @@ export default function AdminPage() {
         )}
 
         {!loadFailed && tab === 'templates' && (
-          <>
+          <div className="admin-templates">
             <SectionToolbar title="Уведомления" onCreate={() => setShowNewTemplate(true)} />
             <p className="lead admin-hint">
               У каждого шаблона видно, когда он отправляется. Для напоминаний после визита выберите интервал
@@ -1108,7 +1371,7 @@ export default function AdminPage() {
             {showNewTemplate && (
               <div className="panel" style={{ marginBottom: '1rem' }}>
                 <strong className="admin-card-title">Новый шаблон</strong>
-                <div className="form" style={{ marginTop: '.75rem' }}>
+                <div className="form admin-templates-form" style={{ marginTop: '.75rem' }}>
                   <label>Ключ (латиница)<input value={newTemplate.key} onChange={(e) => setNewTemplate({ ...newTemplate, key: e.target.value })} placeholder="custom_promo" /></label>
                   <label>Название<input value={newTemplate.title} onChange={(e) => setNewTemplate({ ...newTemplate, title: e.target.value })} placeholder="Акция выходного дня" /></label>
                   {renderTriggerFields(newTemplate, (patch) => setNewTemplate({ ...newTemplate, ...patch }))}
@@ -1134,7 +1397,7 @@ export default function AdminPage() {
                   </div>
                   <p className="admin-trigger">{auto || t.triggerDescription || 'Когда отправляется — не указано'}</p>
                   <p className="admin-key">Ключ: {t.key}</p>
-                  <div className="form" style={{ marginTop: '.75rem' }}>
+                  <div className="form admin-templates-form" style={{ marginTop: '.75rem' }}>
                     <label>Название<input value={t.title} onChange={(e) => patchTemplate(idx, { title: e.target.value })} /></label>
                     {renderTriggerFields(t, (patch) => patchTemplate(idx, patch))}
                     <label>Текст<textarea rows={4} value={t.body} onChange={(e) => patchTemplate(idx, { body: e.target.value })} /></label>
@@ -1147,7 +1410,7 @@ export default function AdminPage() {
                 </div>
               );
             })}
-          </>
+          </div>
         )}
 
         {!loadFailed && tab === 'settings' && (

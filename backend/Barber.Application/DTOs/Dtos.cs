@@ -25,6 +25,8 @@ public record UpsertServiceDto(string Name, string? Description, decimal Price, 
 
 public record CreateAppointmentDto(Guid ServiceId, DateTime StartAtUtc);
 
+public record AdminCreateAppointmentDto(Guid ClientId, Guid ServiceId, DateTime StartAtUtc);
+
 public record RescheduleAppointmentDto(DateTime StartAtUtc);
 
 public record AdminSetAppointmentStatusDto(string Status, DateTime? StartAtUtc);
